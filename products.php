@@ -88,7 +88,7 @@ class Product {
             $productName = $data['product_name'];
             $productSku = $data['product_sku'];
             $sellingPrice = (float)$data['selling_price'];
-            $categoryId = !empty($data['category_id']) ? (int)$data['category_id'] : null;
+            $categoryId = !empty($data['category_id']) ? $data['category_id'] : null;
             $description = $data['description'] ?? '';
             $isActive = $data['is_active'] ?? 1;
             
@@ -109,7 +109,7 @@ class Product {
             $stmt->bindValue(":productSku", $productSku);
             $stmt->bindValue(":productName", $productName);
             $stmt->bindValue(":barcode", $barcode);
-            $stmt->bindValue(":categoryId", $categoryId, PDO::PARAM_INT);
+            $stmt->bindValue(":categoryId", $categoryId, PDO::PARAM_STR);
             $stmt->bindValue(":sellingPrice", $sellingPrice);
             $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
             $stmt->bindValue(":description", $description);
@@ -182,7 +182,7 @@ class Product {
             $productName = $data['product_name'];
             $productSku = $data['product_sku'];
             $sellingPrice = (float)$data['selling_price'];
-            $categoryId = !empty($data['category_id']) ? (int)$data['category_id'] : null;
+            $categoryId = !empty($data['category_id']) ? $data['category_id'] : null;
             $description = $data['description'] ?? '';
             $isActive = $data['is_active'] ?? 1;
 
@@ -199,7 +199,7 @@ class Product {
             $stmt = $conn->prepare($sql);
             $stmt->bindValue(":productSku", $productSku);
             $stmt->bindValue(":productName", $productName);
-            $stmt->bindValue(":categoryId", $categoryId, PDO::PARAM_INT);
+            $stmt->bindValue(":categoryId", $categoryId, PDO::PARAM_STR);
             $stmt->bindValue(":sellingPrice", $sellingPrice);
             $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
             $stmt->bindValue(":description", $description);
@@ -474,16 +474,30 @@ class Product {
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] == 'GET') {
+    $operation = $_GET['operation'] ?? '';
+    $json = $_GET['json'] ?? '{}';
+} else if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $operation = $_GET['operation'] ?? '';
+    
+    $input = file_get_contents('php://input');
+    $data = json_decode($input, true) ?: [];
+    
+    if (empty($data) && !empty($_POST)) {
+        $data = $_POST;
+    }
+    
+    if (empty($operation)) {
+        $operation = $_POST['operation'] ?? '';
+    }
+}
+
 // Handle request
 $product = new Product();
-$operation = $_REQUEST['operation'] ?? '';
-
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($operation, ['insertProduct', 'updateProduct'])) {
-        // For form data submissions (with potential file upload)
         $data = $_POST;
         
-        // If content-type is JSON, parse the input
         if (empty($data) && strpos($_SERVER['CONTENT_TYPE'] ?? '', 'application/json') !== false) {
             $input = file_get_contents('php://input');
             $data = json_decode($input, true);
@@ -491,10 +505,9 @@ try {
         
         echo $product->$operation($data);
     } else {
-        // For other operations (GET or JSON POST)
-        $json = $_SERVER['REQUEST_METHOD'] === 'GET' 
-            ? ($_GET['json'] ?? '') 
-            : (file_get_contents('php://input') ?: '');
+        // $json = $_SERVER['REQUEST_METHOD'] === 'GET' 
+        //     ? ($_GET['json'] ?? '') 
+        //     : (file_get_contents('php://input') ?: '');
         
         switch($operation) {
             case "getAllProducts":

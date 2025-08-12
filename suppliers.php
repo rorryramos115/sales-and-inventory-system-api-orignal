@@ -14,81 +14,81 @@ class Supplier {
     }
 
     // Insert a new supplier
-    function insertSupplier($data) {
-        include "connection-pdo.php";
-        $conn->beginTransaction();
+   function insertSupplier($data) {
+    include "connection-pdo.php";
+    $conn->beginTransaction(); // Start transaction
 
-        try {
-            // Validate required fields
-            if (empty($data['supplier_name'])) {
-                throw new Exception("Supplier name is required");
-            }
-
-            // Generate UUID
-            $supplierId = $this->generateUuid();
-
-            // Check if supplier name already exists
-            $checkSql = "SELECT COUNT(*) as count FROM suppliers WHERE supplier_name = :supplierName";
-            $checkStmt = $conn->prepare($checkSql);
-            $checkStmt->bindValue(":supplierName", $data['supplier_name']);
-            $checkStmt->execute();
-            $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($result['count'] > 0) {
-                throw new Exception("Supplier name already exists");
-            }
-
-            // Prepare data
-            $contactPerson = $data['contact_person'] ?? null;
-            $phone = $data['phone'] ?? null;
-            $email = $data['email'] ?? null;
-            $address = $data['address'] ?? null;
-            $isActive = isset($data['is_active']) ? (int)$data['is_active'] : 1;
-
-            // Insert supplier
-            $sql = "INSERT INTO suppliers(
-                        supplier_id, supplier_name, contact_person, phone, email, 
-                        address, is_active
-                    ) VALUES(
-                        :supplierId, :supplierName, :contactPerson, :phone, :email, 
-                        :address, :isActive
-                    )";
-            
-            $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":supplierId", $supplierId);
-            $stmt->bindValue(":supplierName", $data['supplier_name']);
-            $stmt->bindValue(":contactPerson", $contactPerson);
-            $stmt->bindValue(":phone", $phone);
-            $stmt->bindValue(":email", $email);
-            $stmt->bindValue(":address", $address);
-            $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
-            
-            if (!$stmt->execute()) {
-                throw new Exception("Failed to create supplier");
-            }
-            
-            $conn->commit();
-            
-            return json_encode([
-                'status' => 'success',
-                'message' => 'Supplier created successfully',
-                'data' => [
-                    'supplier_id' => $supplierId,
-                    'supplier_name' => $data['supplier_name'],
-                    'contact_person' => $contactPerson,
-                    'phone' => $phone,
-                    'email' => $email
-                ]
-            ]);
-            
-        } catch (Exception $e) {
-            $conn->rollBack();
-            return json_encode([
-                'status' => 'error',
-                'message' => $e->getMessage()
-            ]);
+    try {
+        // Validate required fields
+        if (empty($data['supplier_name'])) {
+            throw new Exception("Supplier name is required");
         }
+
+        // Generate UUID
+        $supplierId = $this->generateUuid();
+
+        // Check if supplier name already exists
+        $checkSql = "SELECT COUNT(*) as count FROM suppliers WHERE supplier_name = :supplierName";
+        $checkStmt = $conn->prepare($checkSql);
+        $checkStmt->bindValue(":supplierName", $data['supplier_name']);
+        $checkStmt->execute();
+        $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($result['count'] > 0) {
+            throw new Exception("Supplier name already exists");
+        }
+
+        // Prepare data
+        $contactPerson = $data['contact_person'] ?? null;
+        $phone = $data['phone'] ?? null;
+        $email = $data['email'] ?? null;
+        $address = $data['address'] ?? null;
+        $isActive = isset($data['is_active']) ? (int)$data['is_active'] : 1;
+
+        // Insert supplier
+        $sql = "INSERT INTO suppliers(
+                    supplier_id, supplier_name, contact_person, phone, email, 
+                    address, is_active
+                ) VALUES(
+                    :supplierId, :supplierName, :contactPerson, :phone, :email, 
+                    :address, :isActive
+                )";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bindValue(":supplierId", $supplierId);
+        $stmt->bindValue(":supplierName", $data['supplier_name']);
+        $stmt->bindValue(":contactPerson", $contactPerson);
+        $stmt->bindValue(":phone", $phone);
+        $stmt->bindValue(":email", $email);
+        $stmt->bindValue(":address", $address);
+        $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
+        
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to create supplier");
+        }
+        
+        $conn->commit(); // Commit transaction
+        
+        return json_encode([
+            'status' => 'success',
+            'message' => 'Supplier created successfully',
+            'data' => [
+                'supplier_id' => $supplierId,
+                'supplier_name' => $data['supplier_name'],
+                'contact_person' => $contactPerson,
+                'phone' => $phone,
+                'email' => $email
+            ]
+        ]);
+        
+    } catch (Exception $e) {
+        $conn->rollBack();
+        return json_encode([
+            'status' => 'error',
+            'message' => $e->getMessage()
+        ]);
     }
+}
 
     // Update supplier
     function updateSupplier($data) {
@@ -258,46 +258,58 @@ class Supplier {
     }
 
     // Delete a supplier
-    function deleteSupplier($json) {
-        include "connection-pdo.php";
+   function deleteSupplier($json) {
+    include "connection-pdo.php";
+    
+    try {
+        $data = json_decode($json, true);
         
-        try {
-            $json = json_decode($json, true);
-            
-            if(empty($json['supplier_id'])) {
-                echo json_encode([
-                    'status' => 'error',
-                    'message' => 'Missing required field: supplier_id'
-                ]);
-                return;
-            }
-
-            $sql = "DELETE FROM suppliers WHERE supplier_id = :supplierId";
-            $stmt = $conn->prepare($sql);
-            $stmt->bindParam(":supplierId", $json['supplier_id']);
-            $stmt->execute();
-
-            if($stmt->rowCount() > 0) {
-                echo json_encode([
-                    'status' => 'success',
-                    'message' => 'Supplier deleted successfully',
-                    'data' => [
-                        'supplier_id' => $json['supplier_id']
-                    ]
-                ]);
-            } else {
-                echo json_encode([
-                    'status' => 'error',
-                    'message' => 'Supplier not found'
-                ]);
-            }
-        } catch (PDOException $e) {
+        if(empty($data['supplier_id'])) {
             echo json_encode([
                 'status' => 'error',
-                'message' => 'Database error: ' . $e->getMessage()
+                'message' => 'Missing required field: supplier_id'
             ]);
+            return;
         }
+
+        $supplierId = $data['supplier_id'];
+
+        // First check if supplier exists (optional but recommended)
+        $checkSql = "SELECT COUNT(*) as count FROM suppliers WHERE supplier_id = :supplierId";
+        $checkStmt = $conn->prepare($checkSql);
+        $checkStmt->bindParam(":supplierId", $supplierId);
+        $checkStmt->execute();
+        $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if($result['count'] == 0) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Supplier not found'
+            ]);
+            return;
+        }
+
+        // Delete the supplier
+        $sql = "DELETE FROM suppliers WHERE supplier_id = :supplierId";
+        $stmt = $conn->prepare($sql);
+        $stmt->bindParam(":supplierId", $supplierId);
+        $stmt->execute();
+
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Supplier deleted successfully',
+            'data' => [
+                'supplier_id' => $supplierId
+            ]
+        ]);
+        
+    } catch (PDOException $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Database error: ' . $e->getMessage()
+        ]);
     }
+}
 
     // Check if supplier name exists
     function checkSupplierName($json) {
@@ -389,51 +401,56 @@ class Supplier {
 }
 
 
-if ($_SERVER['REQUEST_METHOD'] == 'GET'){
-  $operation = $_GET['operation'];
-  $json = isset($_GET['json']) ? $_GET['json'] : "";
-}else if($_SERVER['REQUEST_METHOD'] == 'POST'){
-  // Check if operation is in POST data
-  if(isset($_POST['operation'])){
-    $operation = $_POST['operation'];
-    $json = isset($_POST['json']) ? $_POST['json'] : "";
-  } else {
-    // Handle JSON body for POST requests
-    $input = file_get_contents('php://input');
-    $data = json_decode($input, true);
+if ($_SERVER['REQUEST_METHOD'] == 'GET') {
+    $operation = $_GET['operation'] ?? '';
+    $json = $_GET['json'] ?? '{}';
+} else if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $operation = $_GET['operation'] ?? '';
     
-    // Get operation from URL parameter
-    $operation = isset($_GET['operation']) ? $_GET['operation'] : '';
-    $json = $input; // Use the raw JSON input
-  }
+    $input = file_get_contents('php://input');
+    $data = json_decode($input, true) ?: [];
+    
+    if (empty($data) && !empty($_POST)) {
+        $data = $_POST;
+    }
+    
+    if (empty($operation)) {
+        $operation = $_POST['operation'] ?? '';
+    }
 }
 
 $supplier = new Supplier();
-switch($operation) {
-    case "getAllSuppliers":
-        echo $supplier->getAllSuppliers();
-        break;
-    case "getActiveSuppliers":
-        echo $supplier->getActiveSuppliers();
-        break;
-    case "getSupplier":
-        echo $supplier->getSupplier($json);
-        break;
-    case "deleteSupplier":
-        echo $supplier->deleteSupplier($json);
-        break;
-    case "checkSupplierName":
-        echo $supplier->checkSupplierName($json);
-        break;
-    case "searchSuppliers":
-        echo $supplier->searchSuppliers($json);
-        break;
-    default:
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'Invalid operation'
-        ]);
+
+if ($operation === "insertSupplier") {
+    echo $supplier->insertSupplier($data);
+} elseif ($operation === "updateSupplier") {
+    echo $supplier->updateSupplier($data);
+} else {
+    // Handle other operations
+    switch($operation) {
+        case "getAllSuppliers":
+            echo $supplier->getAllSuppliers();
+            break;
+        case "getActiveSuppliers":
+            echo $supplier->getActiveSuppliers();
+            break;
+        case "getSupplier":
+            echo $supplier->getSupplier($json);
+            break;
+        case "deleteSupplier":
+            echo $supplier->deleteSupplier($json);
+            break;
+        case "checkSupplierName":
+            echo $supplier->checkSupplierName($json);
+            break;
+        case "searchSuppliers":
+            echo $supplier->searchSuppliers($json);
+            break;
+        default:
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Invalid operation'
+            ]);
+    }
 }
-
-
 ?>
