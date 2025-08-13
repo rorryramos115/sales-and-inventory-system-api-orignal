@@ -1,6 +1,14 @@
 <?php
-header('Content-Type: application/json');
 header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, GET, PUT, DELETE, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization");
+header("Content-Type: application/json");
+
+// Handle OPTIONS request for CORS preflight
+if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
 
 class User {
     private function generateUuid() {
@@ -288,53 +296,63 @@ class User {
         }
     }
 
-    // User login
-    function login($json) {
-        include "connection-pdo.php";
+    function login($input) {
+    include "connection-pdo.php";
+    
+    try {
+        // Handle both array and JSON string input
+        $data = is_array($input) ? $input : json_decode($input, true);
         
-        try {
-            $json = json_decode($json, true);
-            
-            // Validate required fields
-            if(empty($json['email']) || empty($json['password'])) {
-                echo json_encode([
-                    'status' => 'error',
-                    'message' => 'Email and password are required'
-                ]);
-                return;
-            }
+        if (json_last_error() !== JSON_ERROR_NONE && !is_array($input)) {
+            throw new Exception("Invalid JSON data");
+        }
 
-            $sql = "SELECT u.*, r.role_name 
-                    FROM users u 
-                    LEFT JOIN roles r ON u.role_id = r.role_id 
-                    WHERE u.email = :email AND u.is_active = 1";
-            $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":email", $json['email']);
-            $stmt->execute();
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if($user && password_verify($json['password'], $user['password'])) {
-                // Remove sensitive data before returning
-                unset($user['password']);
-                
-                echo json_encode([
-                    'status' => 'success',
-                    'message' => 'Login successful',
-                    'data' => $user
-                ]);
-            } else {
-                echo json_encode([
-                    'status' => 'error',
-                    'message' => 'Invalid email or password'
-                ]);
-            }
-        } catch (PDOException $e) {
+        // Validate required fields
+        if(empty($data['email']) || empty($data['password'])) {
             echo json_encode([
                 'status' => 'error',
-                'message' => 'Database error: ' . $e->getMessage()
+                'message' => 'Email and password are required',
+                'received_data' => $data // For debugging
+            ]);
+            return;
+        }
+
+        $sql = "SELECT u.*, r.role_name 
+                FROM users u 
+                LEFT JOIN roles r ON u.role_id = r.role_id 
+                WHERE u.email = :email AND u.is_active = 1";
+        $stmt = $conn->prepare($sql);
+        $stmt->bindValue(":email", $data['email']);
+        $stmt->execute();
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if($user && password_verify($data['password'], $user['password'])) {
+            // Remove sensitive data before returning
+            unset($user['password']);
+            
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Login successful',
+                'data' => $user
+            ]);
+        } else {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Invalid email or password'
             ]);
         }
+    } catch (PDOException $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Database error: ' . $e->getMessage()
+        ]);
+    } catch (Exception $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => $e->getMessage()
+        ]);
     }
+}
 
     // Check if email exists
     function checkEmail($json) {
@@ -432,56 +450,67 @@ class User {
     }
 }
 
+$user = new User();
+$operation = '';
+$data = [];
+$operation = $_GET['operation'] ?? ($_POST['operation'] ?? '');
+
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
-    $operation = $_GET['operation'] ?? '';
     $json = $_GET['json'] ?? '{}';
-} else if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $operation = $_GET['operation'] ?? '';
-    
+    $data = json_decode($json, true) ?: [];
+} else {
     $input = file_get_contents('php://input');
     $data = json_decode($input, true) ?: [];
     
-    if (empty($data) && !empty($_POST)) {
+    if (empty($data) && $_SERVER['REQUEST_METHOD'] == 'POST') {
         $data = $_POST;
-    }
-    
-    if (empty($operation)) {
-        $operation = $_POST['operation'] ?? '';
     }
 }
 
-
-$user = new User();
-if ($operation === "insertUser") {
-    echo $user->insertUser($data);
-} elseif ($operation === "updateUser") {
-    echo $user->updateUser($data);
-} else {
-    switch($operation) {
-        case "getAllUsers":
-            echo $user->getAllUsers();
-            break;
-        case "getUser":
-            echo $user->getUser($json);
-            break;
-        case "deleteUser":
-            echo $user->deleteUser($json);
-            break;
-        case "checkEmail":
-            echo $user->checkEmail($json);
-            break;
-        case "login":
-            echo $user->login($json);
-            break;
-        case "searchUsers":
-            echo $user->searchUsers($json);
-            break;
-        default:
-            echo json_encode([
-                'status' => 'error',
-                'message' => 'Invalid operation'
-            ]);
-    }
+switch ($operation) {
+    case "insertUser":
+        echo $user->insertUser($data);
+        break;
+    case "updateUser":
+        echo $user->updateUser($data);
+        break;
+    case "login":
+        echo $user->login($data);
+        break;
+    case "getAllUsers":
+        echo $user->getAllUsers();
+        break;
+    case "getUser":
+        $json = $_GET['json'] ?? '{}';
+        echo $user->getUser($json);
+        break;
+    case "deleteUser":
+        $json = $_GET['json'] ?? '{}';
+        echo $user->deleteUser($json);
+        break;
+    case "checkEmail":
+        $json = $_GET['json'] ?? '{}';
+        echo $user->checkEmail($json);
+        break;
+    case "searchUsers":
+        $json = $_GET['json'] ?? '{}';
+        echo $user->searchUsers($json);
+        break;
+    default:
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Invalid operation',
+            'available_operations' => [
+                'insertUser', 
+                'updateUser', 
+                'login', 
+                'getAllUsers', 
+                'getUser', 
+                'deleteUser', 
+                'checkEmail', 
+                'searchUsers'
+            ]
+        ]);
 }
     
 ?>

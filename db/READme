@@ -24,7 +24,7 @@ CREATE TABLE users (
 
 -- Counter table
 CREATE TABLE counters (
-    counter_id INT AUTO_INCREMENT PRIMARY KEY,
+    counter_id CHAR(36) PRIMARY KEY,
     counter_name VARCHAR(50) NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -33,14 +33,21 @@ CREATE TABLE counters (
 
 -- Assign sales (users to counters)
 CREATE TABLE assign_sales (
-    assign_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    counter_id INT NOT NULL,
-    assigned_date DATE NOT NULL,
+    counter_assign_id CHAR(36) PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    counter_id CHAR(36) NOT NULL,
+    assigned_datetime DATETIME NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (counter_id) REFERENCES counters(counter_id),
-    UNIQUE KEY (user_id, counter_id, assigned_date)
+    FOREIGN KEY (counter_id) REFERENCES counters(counter_id)
+);
+
+CREATE TABLE unassign_sales (
+    counter_unassign_id CHAR(36) PRIMARY KEY,
+    counter_assign_id CHAR(36) NOT NULL,
+    unassigned_datetime DATETIME NOT NULL,
+    unassign_reason TEXT,
+    FOREIGN KEY (counter_assign_id) REFERENCES assign_sales(counter_assign_id)
 );
 
 -- Category table
@@ -54,21 +61,6 @@ CREATE TABLE categories (
 );
 
 -- Products table
--- CREATE TABLE products (
---     product_id INT AUTO_INCREMENT PRIMARY KEY,
---     product_code VARCHAR(20) NOT NULL UNIQUE,
---     product_name VARCHAR(100) NOT NULL,
---     barcode VARCHAR(50) NOT NULL UNIQUE,
---     category_id INT,
---     purchase_price DECIMAL(10,2) NOT NULL,
---     selling_price DECIMAL(10,2) NOT NULL,
---     min_stock_level INT DEFAULT 0,
---     is_active BOOLEAN DEFAULT TRUE,
---     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
---     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
---     FOREIGN KEY (category_id) REFERENCES categories(category_id)
--- );
-
 CREATE TABLE products (
     product_id CHAR(36) PRIMARY KEY,
     product_sku VARCHAR(20) NOT NULL UNIQUE,
@@ -84,21 +76,21 @@ CREATE TABLE products (
     FOREIGN KEY (category_id) REFERENCES categories(category_id)
 );
 
-
 -- Warehouse table
 CREATE TABLE warehouses (
-    warehouse_id INT AUTO_INCREMENT PRIMARY KEY,
+    warehouse_id CHAR(36) PRIMARY KEY,
     warehouse_name VARCHAR(50) NOT NULL,
     location VARCHAR(100),
     is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 -- Assign warehouse (users to warehouses)
 CREATE TABLE assign_warehouse (
-    assign_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    warehouse_id INT NOT NULL,
+    warehouse_assign_id CHAR(36) PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    warehouse_id CHAR(36) NOT NULL,
     assigned_date DATE NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (user_id) REFERENCES users(user_id),
@@ -106,11 +98,25 @@ CREATE TABLE assign_warehouse (
     UNIQUE KEY (user_id, warehouse_id, assigned_date)
 );
 
+-- Warehouse stock with batch and expiry tracking
+CREATE TABLE warehouse_stock (
+    stock_id CHAR(36) PRIMARY KEY,
+    warehouse_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NOT NULL,
+    batch_number VARCHAR(50),
+    quantity INT NOT NULL DEFAULT 0,
+    expiry_date DATE,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (product_id) REFERENCES products(product_id),
+    UNIQUE KEY (warehouse_id, product_id, batch_number, expiry_date)
+);
+
 -- Product stock table (inventory)
 CREATE TABLE product_stock (
-    stock_id INT AUTO_INCREMENT PRIMARY KEY,
-    product_id INT NOT NULL,
-    warehouse_id INT,
+    stock_id CHAR(36) PRIMARY KEY,
+    product_id CHAR(36) NOT NULL,
+    warehouse_id CHAR(36),
     quantity INT NOT NULL DEFAULT 0,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products(product_id),
@@ -120,7 +126,7 @@ CREATE TABLE product_stock (
 
 -- Supplier table
 CREATE TABLE suppliers (
-    supplier_id INT AUTO_INCREMENT PRIMARY KEY,
+    supplier_id CHAR(36) PRIMARY KEY,
     supplier_name VARCHAR(100) NOT NULL UNIQUE,
     contact_person VARCHAR(100),
     phone VARCHAR(20),
@@ -133,9 +139,9 @@ CREATE TABLE suppliers (
 
 -- Supplier products (products supplied by each supplier)
 CREATE TABLE supplier_products (
-    supplier_product_id INT AUTO_INCREMENT PRIMARY KEY,
-    supplier_id INT NOT NULL,
-    product_id INT NOT NULL,
+    supplier_product_id CHAR(36) PRIMARY KEY,
+    supplier_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NOT NULL,
     supply_price DECIMAL(10,2) NOT NULL,
     lead_time_days INT,
     is_active BOOLEAN DEFAULT TRUE,
@@ -146,14 +152,14 @@ CREATE TABLE supplier_products (
 
 -- Product order (purchase orders to suppliers)
 CREATE TABLE product_orders (
-    order_id INT AUTO_INCREMENT PRIMARY KEY,
-    supplier_id INT NOT NULL,
+    order_id CHAR(36) PRIMARY KEY,
+    supplier_id CHAR(36) NOT NULL,
     order_date DATE NOT NULL,
     expected_delivery_date DATE,
     status ENUM('pending', 'approved', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
     total_amount DECIMAL(12,2),
     notes TEXT,
-    created_by INT NOT NULL,
+    created_by CHAR(36) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
@@ -162,9 +168,9 @@ CREATE TABLE product_orders (
 
 -- Product order items
 CREATE TABLE product_order_items (
-    order_item_id INT AUTO_INCREMENT PRIMARY KEY,
-    order_id INT NOT NULL,
-    product_id INT NOT NULL,
+    order_item_id CHAR(36) PRIMARY KEY,
+    order_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     total_price DECIMAL(10,2) NOT NULL,
@@ -175,12 +181,12 @@ CREATE TABLE product_order_items (
 
 -- Stock receive (supplier deliveries)
 CREATE TABLE stock_receive (
-    receive_id INT AUTO_INCREMENT PRIMARY KEY,
-    order_id INT,
+    receive_id CHAR(36) PRIMARY KEY,
+    order_id CHAR(36),
     receive_date DATE NOT NULL,
-    supplier_id INT NOT NULL,
-    warehouse_id INT NOT NULL,
-    received_by INT NOT NULL,
+    supplier_id CHAR(36) NOT NULL,
+    warehouse_id CHAR(36) NOT NULL,
+    received_by CHAR(36) NOT NULL,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES product_orders(order_id),
@@ -191,9 +197,9 @@ CREATE TABLE stock_receive (
 
 -- Stock receive items
 CREATE TABLE stock_receive_items (
-    receive_item_id INT AUTO_INCREMENT PRIMARY KEY,
-    receive_id INT NOT NULL,
-    product_id INT NOT NULL,
+    receive_item_id CHAR(36) PRIMARY KEY,
+    receive_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     batch_number VARCHAR(50),
@@ -204,12 +210,12 @@ CREATE TABLE stock_receive_items (
 
 -- Supplier returns
 CREATE TABLE supplier_returns (
-    return_id INT AUTO_INCREMENT PRIMARY KEY,
-    supplier_id INT NOT NULL,
+    return_id CHAR(36) PRIMARY KEY,
+    supplier_id CHAR(36) NOT NULL,
     return_date DATE NOT NULL,
-    warehouse_id INT NOT NULL,
+    warehouse_id CHAR(36) NOT NULL,
     reason TEXT,
-    returned_by INT NOT NULL,
+    returned_by CHAR(36) NOT NULL,
     status ENUM('pending', 'approved', 'completed') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
@@ -219,9 +225,9 @@ CREATE TABLE supplier_returns (
 
 -- Supplier return items
 CREATE TABLE supplier_return_items (
-    return_item_id INT AUTO_INCREMENT PRIMARY KEY,
-    return_id INT NOT NULL,
-    product_id INT NOT NULL,
+    return_item_id CHAR(36) PRIMARY KEY,
+    return_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     batch_number VARCHAR(50),
@@ -232,12 +238,12 @@ CREATE TABLE supplier_return_items (
 
 -- Warehouse transfers
 CREATE TABLE warehouse_transfers (
-    transfer_id INT AUTO_INCREMENT PRIMARY KEY,
-    from_warehouse_id INT NOT NULL,
-    to_warehouse_id INT NOT NULL,
+    transfer_id CHAR(36) PRIMARY KEY,
+    from_warehouse_id CHAR(36) NOT NULL,
+    to_warehouse_id CHAR(36) NOT NULL,
     transfer_date DATE NOT NULL,
     status ENUM('pending', 'in_transit', 'completed', 'cancelled') DEFAULT 'pending',
-    transferred_by INT NOT NULL,
+    transferred_by CHAR(36) NOT NULL,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (from_warehouse_id) REFERENCES warehouses(warehouse_id),
@@ -247,9 +253,9 @@ CREATE TABLE warehouse_transfers (
 
 -- Warehouse transfer items
 CREATE TABLE warehouse_transfer_items (
-    transfer_item_id INT AUTO_INCREMENT PRIMARY KEY,
-    transfer_id INT NOT NULL,
-    product_id INT NOT NULL,
+    transfer_item_id CHAR(36) PRIMARY KEY,
+    transfer_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     received_quantity INT DEFAULT 0,
     batch_number VARCHAR(50),
@@ -259,11 +265,11 @@ CREATE TABLE warehouse_transfer_items (
 
 -- Sales table
 CREATE TABLE sales (
-    sale_id INT AUTO_INCREMENT PRIMARY KEY,
+    sale_id CHAR(36) PRIMARY KEY,
     sale_code VARCHAR(20) NOT NULL UNIQUE,
     sale_date DATETIME NOT NULL,
-    counter_id INT NOT NULL,
-    user_id INT NOT NULL,
+    counter_id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
     total_items INT NOT NULL,
     subtotal DECIMAL(12,2) NOT NULL,
     tax_amount DECIMAL(10,2) DEFAULT 0,
@@ -276,9 +282,9 @@ CREATE TABLE sales (
 
 -- Sales items
 CREATE TABLE sales_items (
-    sale_item_id INT AUTO_INCREMENT PRIMARY KEY,
-    sale_id INT NOT NULL,
-    product_id INT NOT NULL,
+    sale_item_id CHAR(36) PRIMARY KEY,
+    sale_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     total_price DECIMAL(10,2) NOT NULL,
@@ -288,25 +294,25 @@ CREATE TABLE sales_items (
 
 -- Receipts table
 CREATE TABLE receipts (
-    receipt_id INT AUTO_INCREMENT PRIMARY KEY,
+    receipt_id CHAR(36) PRIMARY KEY,
     receipt_number VARCHAR(20) NOT NULL UNIQUE,
-    sale_id INT NOT NULL,
+    sale_id CHAR(36) NOT NULL,
     receipt_date DATETIME NOT NULL,
     amount DECIMAL(12,2) NOT NULL,
-    created_by INT NOT NULL,
+    created_by CHAR(36) NOT NULL,
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id),
     FOREIGN KEY (created_by) REFERENCES users(user_id)
 );
 
 -- Sales returns
 CREATE TABLE sales_returns (
-    return_id INT AUTO_INCREMENT PRIMARY KEY,
-    receipt_id INT,
-    original_sale_id INT NOT NULL,
+    return_id CHAR(36) PRIMARY KEY,
+    receipt_id CHAR(36),
+    original_sale_id CHAR(36) NOT NULL,
     return_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    counter_id INT NOT NULL,
-    user_id INT NOT NULL,
-    warehouse_id INT NOT NULL,
+    counter_id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
+    warehouse_id CHAR(36) NOT NULL,
     total_items INT NOT NULL,
     total_amount DECIMAL(12,2) NOT NULL,
     reason TEXT,
@@ -319,10 +325,10 @@ CREATE TABLE sales_returns (
 
 -- Sales return items
 CREATE TABLE sales_return_items (
-    return_item_id INT AUTO_INCREMENT PRIMARY KEY,
-    return_id INT NOT NULL,
-    product_id INT NOT NULL,
-    sale_item_id INT NOT NULL,
+    return_item_id CHAR(36) PRIMARY KEY,
+    return_id CHAR(36) NOT NULL,
+    product_id CHAR(36) NOT NULL,
+    sale_item_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     total_price DECIMAL(10,2) NOT NULL,
@@ -332,4 +338,66 @@ CREATE TABLE sales_return_items (
     FOREIGN KEY (return_id) REFERENCES sales_returns(return_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id),
     FOREIGN KEY (sale_item_id) REFERENCES sales_items(sale_item_id)
+);
+
+-- Stock movements
+CREATE TABLE stock_movements (
+    movement_id CHAR(36) PRIMARY KEY,
+    product_id CHAR(36) NOT NULL,
+    warehouse_id CHAR(36) NOT NULL,
+    movement_type ENUM('stock_in','stock_out','transfer_in','transfer_out','sale','return','adjustment') NOT NULL,
+    quantity INT NOT NULL,
+    reference_id CHAR(36),
+    reference_table VARCHAR(50),
+    created_by CHAR(36) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(product_id),
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (created_by) REFERENCES users(user_id)
+);
+
+-- Product price history
+CREATE TABLE product_price_history (
+    price_id CHAR(36) PRIMARY KEY,
+    product_id CHAR(36) NOT NULL,
+    old_price DECIMAL(10,2),
+    new_price DECIMAL(10,2),
+    changed_by CHAR(36) NOT NULL,
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(product_id),
+    FOREIGN KEY (changed_by) REFERENCES users(user_id)
+);
+
+-- Possible Add Tables
+CREATE TABLE inventory_adjustments (
+    adjustment_id CHAR(36) PRIMARY KEY,
+    product_id CHAR(36) NOT NULL,
+    warehouse_id CHAR(36) NOT NULL,
+    quantity_before INT NOT NULL,
+    quantity_after INT NOT NULL,
+    adjustment_type ENUM('found', 'lost', 'spoiled', 'damaged', 'theft', 'other') NOT NULL,
+    reason TEXT,
+    adjusted_by CHAR(36) NOT NULL,
+    adjustment_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(product_id),
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (adjusted_by) REFERENCES users(user_id)
+);
+
+CREATE TABLE payment_methods (
+    payment_method_id CHAR(36) PRIMARY KEY,
+    method_name VARCHAR(50) NOT NULL UNIQUE,
+    description VARCHAR(255),
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE sale_payments (
+    payment_id CHAR(36) PRIMARY KEY,
+    sale_id CHAR(36) NOT NULL,
+    payment_method_id CHAR(36) NOT NULL,
+    amount DECIMAL(12,2) NOT NULL,
+    transaction_reference VARCHAR(100),
+    payment_datetime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sale_id) REFERENCES sales(sale_id),
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods(payment_method_id)
 );

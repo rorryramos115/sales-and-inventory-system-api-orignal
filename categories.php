@@ -1,6 +1,14 @@
 <?php
-  header('Content-Type: application/json');
-  header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, GET, PUT, DELETE, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization");
+header("Content-Type: application/json");
+
+// Handle OPTIONS request for CORS preflight
+if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+  http_response_code(200);
+  exit();
+}
 
   class Category {
      private function generateUuid() {
@@ -17,7 +25,7 @@
       include "connection-pdo.php";
 
       try {
-        $sql = "SELECT * FROM categories ORDER BY category_name";
+        $sql = "SELECT * FROM categories ORDER BY created_at DESC";
         $stmt = $conn->prepare($sql);
         $stmt->execute();
         $rs = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -37,9 +45,9 @@
 
     function insertCategory($json){
         include "connection-pdo.php";
+         $conn->beginTransaction();
 
         try {
-            $json = json_decode($json, true);
             
             if(empty($json['category_name'])) {
                 echo json_encode([
@@ -56,6 +64,8 @@
             $stmt->bindParam(":categoryName", $json['category_name']);
             $stmt->bindParam(":description", $json['description']);
             $stmt->execute();
+
+             $conn->commit(); 
 
             if($stmt->rowCount() > 0){
                 echo json_encode([
@@ -131,9 +141,9 @@
 
     function updateCategory($json){
       include "connection-pdo.php";
+        $conn->beginTransaction();
       
       try {
-        $json = json_decode($json, true);
         
         // Validate required fields
         if(empty($json['category_id']) || empty($json['category_name'])) {
@@ -150,6 +160,8 @@
         $stmt->bindParam(":description", $json['description']);
         $stmt->bindParam(":categoryId", $json['category_id']);
         $stmt->execute();
+
+          $conn->commit(); 
 
         if($stmt->rowCount() > 0){
           echo json_encode([
@@ -224,6 +236,45 @@
       }
     }
 
+    function searchCategories($json) {
+      include "connection-pdo.php";
+      
+      try {
+          $json = json_decode($json, true);
+          
+          if(empty($json['search_term'])) {
+              echo json_encode([
+                  'status' => 'error',
+                  'message' => 'Missing required field: search_term'
+              ]);
+              return;
+          }
+
+          $searchTerm = '%' . $json['search_term'] . '%';
+          $sql = "SELECT * FROM categories 
+                  WHERE category_name LIKE :searchTerm 
+                  OR description LIKE :searchTerm
+                  ORDER BY category_name
+                  LIMIT 20";
+          
+          $stmt = $conn->prepare($sql);
+          $stmt->bindValue(":searchTerm", $searchTerm);
+          $stmt->execute();
+          $rs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+          echo json_encode([
+              'status' => 'success',
+              'message' => 'Categories search completed',
+              'data' => $rs
+          ]);
+      } catch (PDOException $e) {
+          echo json_encode([
+              'status' => 'error',
+              'message' => 'Database error: ' . $e->getMessage()
+          ]);
+      }
+  }
+
     function checkCategoryName($json){
       include "connection-pdo.php";
       
@@ -268,49 +319,65 @@
     }
   }
 
-  //submitted by the client - operation and json
-  if ($_SERVER['REQUEST_METHOD'] == 'GET'){
-    $operation = $_GET['operation'];
-    $json = isset($_GET['json']) ? $_GET['json'] : "";
-  }else if($_SERVER['REQUEST_METHOD'] == 'POST'){
-    // Prefer POST params, then URL params, then raw JSON body
-    if(isset($_POST['operation'])){
-      $operation = $_POST['operation'];
-    } else if(isset($_GET['operation'])){
-      $operation = $_GET['operation'];
-    } else {
-      $operation = '';
-    }
 
-    if(isset($_POST['json'])){
-      $json = $_POST['json'];
-    } else if(isset($_GET['json'])){
-      $json = $_GET['json'];
-    } else {
-      // Fallback to raw body
-      $json = file_get_contents('php://input');
-    }
-  }
 
-  $category = new Category();
-  switch($operation){
-    case "getAllCategories":
-      echo $category->getAllCategories();
-      break;
-    case "insertCategory":
-      echo $category->insertCategory($json);
-      break;
-    case "getCategory":
-      echo $category->getCategory($json);
-      break;
-    case "updateCategory":
-      echo $category->updateCategory($json);
-      break;
-    case "deleteCategory":
-      echo $category->deleteCategory($json);
-      break;
-    case "checkCategoryName":
-      echo $category->checkCategoryName($json);
-      break;
-  }
+$category = new Category();
+$operation = '';
+$data = [];
+$operation = $_GET['operation'] ?? ($_POST['operation'] ?? '');
+
+if ($_SERVER['REQUEST_METHOD'] == 'GET') {
+    $json = $_GET['json'] ?? '{}';
+    $data = json_decode($json, true) ?: [];
+} else {
+    $input = file_get_contents('php://input');
+    $data = json_decode($input, true) ?: [];
+    
+    if (empty($data) && $_SERVER['REQUEST_METHOD'] == 'POST') {
+        $data = $_POST;
+    }
+}
+
+switch($operation){
+  case "insertCategory":
+    echo $category->insertCategory($data);
+    break;
+  case "updateCategory":
+    echo $category->updateCategory($data);
+    break;
+  case "getAllCategories":
+    echo $category->getAllCategories();
+    break;
+  case "getCategory":
+    $json = $_GET['json'] ?? '{}';
+    echo $category->getCategory($json);
+    break;
+  case "deleteCategory":
+    $json = $_GET['json'] ?? '{}';
+    echo $category->deleteCategory($json);
+    break;
+  case "searchCategories":
+    $json = $_GET['json'] ?? '{}';
+    echo $category->searchCategories($json);
+    break;
+  case "checkCategoryName":
+    $json = $_GET['json'] ?? '{}';
+    echo $category->checkCategoryName($json);
+    break;
+  default:
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Invalid operation',
+        'available_operations' => [
+            'insertUser', 
+            'updateUser', 
+            'login', 
+            'getAllUsers', 
+            'getUser', 
+            'deleteUser', 
+            'checkEmail', 
+            'searchUsers'
+        ]
+    ]);
+}
 ?>
