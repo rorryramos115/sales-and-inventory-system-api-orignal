@@ -565,7 +565,46 @@ class Warehouse {
               'message' => 'Database error: ' . $e->getMessage()
           ]);
       }
-  }
+   }
+
+   // Get warehouses assigned to a specific user
+    function getWarehousesByUserId($json) {
+        include "connection-pdo.php";
+        
+        try {
+            $json = json_decode($json, true);
+            
+            if(empty($json['user_id'])) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Missing required field: user_id'
+                ]);
+                return;
+            }
+
+            $sql = "SELECT w.*, aw.assigned_date
+                    FROM warehouses w
+                    JOIN assign_warehouse aw ON w.warehouse_id = aw.warehouse_id
+                    WHERE aw.user_id = :userId AND aw.is_active = 1
+                    ORDER BY w.warehouse_name";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":userId", $json['user_id']);
+            $stmt->execute();
+            $warehouses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Warehouses retrieved successfully',
+                'data' => $warehouses
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
 }
 
 // Handle the request
@@ -616,6 +655,9 @@ if ($operation === "createWarehouse") {
             break;
         case "getPotentialManagers":
             $warehouse->getPotentialManagers();
+            break;
+        case "getWarehousesByUserId":
+            $warehouse->getWarehousesByUserId($json);
             break;
         default:
             echo json_encode([

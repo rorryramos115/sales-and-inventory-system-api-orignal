@@ -103,13 +103,12 @@ CREATE TABLE warehouse_stock (
     stock_id CHAR(36) PRIMARY KEY,
     warehouse_id CHAR(36) NOT NULL,
     product_id CHAR(36) NOT NULL,
-    batch_number VARCHAR(50),
     quantity INT NOT NULL DEFAULT 0,
-    expiry_date DATE,
+    unit_cost DECIMAL(10,2),
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id),
-    UNIQUE KEY (warehouse_id, product_id, batch_number, expiry_date)
+    UNIQUE KEY (warehouse_id, product_id)
 );
 
 -- Product stock table (inventory)
@@ -143,7 +142,6 @@ CREATE TABLE supplier_products (
     supplier_id CHAR(36) NOT NULL,
     product_id CHAR(36) NOT NULL,
     supply_price DECIMAL(10,2) NOT NULL,
-    lead_time_days INT,
     is_active BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id),
@@ -151,12 +149,24 @@ CREATE TABLE supplier_products (
 );
 
 -- Product order (purchase orders to suppliers)
+-- CREATE TABLE product_orders (
+--     order_id CHAR(36) PRIMARY KEY,
+--     supplier_id CHAR(36) NOT NULL,
+--     order_date DATE NOT NULL,
+--     expected_delivery_date DATE,
+--     status ENUM('pending', 'approved', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
+--     total_amount DECIMAL(12,2),
+--     notes TEXT,
+--     created_by CHAR(36) NOT NULL,
+--     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+--     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+--     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
+--     FOREIGN KEY (created_by) REFERENCES users(user_id)
+-- );
 CREATE TABLE product_orders (
     order_id CHAR(36) PRIMARY KEY,
     supplier_id CHAR(36) NOT NULL,
     order_date DATE NOT NULL,
-    expected_delivery_date DATE,
-    status ENUM('pending', 'approved', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
     total_amount DECIMAL(12,2),
     notes TEXT,
     created_by CHAR(36) NOT NULL,
@@ -174,7 +184,6 @@ CREATE TABLE product_order_items (
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     total_price DECIMAL(10,2) NOT NULL,
-    received_quantity INT DEFAULT 0,
     FOREIGN KEY (order_id) REFERENCES product_orders(order_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
@@ -202,10 +211,23 @@ CREATE TABLE stock_receive_items (
     product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
-    batch_number VARCHAR(50),
-    expiry_date DATE,
     FOREIGN KEY (receive_id) REFERENCES stock_receive(receive_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id)
+);
+
+CREATE TABLE stock_movements (
+    movement_id CHAR(36) PRIMARY KEY,
+    product_id CHAR(36) NOT NULL,
+    warehouse_id CHAR(36) NOT NULL,
+    movement_type ENUM('stock_in','stock_out','transfer_in','transfer_out','sale','return','adjustment') NOT NULL,
+    quantity INT NOT NULL,
+    reference_id CHAR(36),
+    reference_table VARCHAR(50),
+    created_by CHAR(36) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(product_id),
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (created_by) REFERENCES users(user_id)
 );
 
 -- Supplier returns
@@ -341,20 +363,6 @@ CREATE TABLE sales_return_items (
 );
 
 -- Stock movements
-CREATE TABLE stock_movements (
-    movement_id CHAR(36) PRIMARY KEY,
-    product_id CHAR(36) NOT NULL,
-    warehouse_id CHAR(36) NOT NULL,
-    movement_type ENUM('stock_in','stock_out','transfer_in','transfer_out','sale','return','adjustment') NOT NULL,
-    quantity INT NOT NULL,
-    reference_id CHAR(36),
-    reference_table VARCHAR(50),
-    created_by CHAR(36) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(product_id),
-    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
-    FOREIGN KEY (created_by) REFERENCES users(user_id)
-);
 
 -- Product price history
 CREATE TABLE product_price_history (
@@ -368,7 +376,7 @@ CREATE TABLE product_price_history (
     FOREIGN KEY (changed_by) REFERENCES users(user_id)
 );
 
--- Possible Add Tables
+-- ==================== Possible Add Tables not added yet =======================
 CREATE TABLE inventory_adjustments (
     adjustment_id CHAR(36) PRIMARY KEY,
     product_id CHAR(36) NOT NULL,
@@ -400,4 +408,22 @@ CREATE TABLE sale_payments (
     payment_datetime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id),
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(payment_method_id)
+);
+
+CREATE TABLE stock_movements (
+    movement_id CHAR(36) PRIMARY KEY,
+    reference_type ENUM('RECEIVE', 'ADJUSTMENT', 'TRANSFER', 'SALE') NOT NULL,
+    reference_id CHAR(36) NOT NULL, -- Links to source document
+    product_id CHAR(36) NOT NULL,
+    warehouse_id CHAR(36) NOT NULL,
+    batch_number VARCHAR(50),
+    expiry_date DATE,
+    quantity_change INT NOT NULL, -- Positive for in, negative for out
+    unit_cost DECIMAL(10,2),
+    movement_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    moved_by CHAR(36) NOT NULL,
+    notes TEXT,
+    FOREIGN KEY (product_id) REFERENCES products(product_id),
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (moved_by) REFERENCES users(user_id)
 );

@@ -296,38 +296,138 @@ class User {
         }
     }
 
-    function login($input) {
-    include "connection-pdo.php";
-    
-    try {
-        // Handle both array and JSON string input
-        $data = is_array($input) ? $input : json_decode($input, true);
+    // function login($input) {
+    //     include "connection-pdo.php";
         
-        if (json_last_error() !== JSON_ERROR_NONE && !is_array($input)) {
-            throw new Exception("Invalid JSON data");
-        }
+    //     try {
+    //         // Handle both array and JSON string input
+    //         $data = is_array($input) ? $input : json_decode($input, true);
+            
+    //         if (json_last_error() !== JSON_ERROR_NONE && !is_array($input)) {
+    //             throw new Exception("Invalid JSON data");
+    //         }
 
-        // Validate required fields
-        if(empty($data['email']) || empty($data['password'])) {
-            echo json_encode([
-                'status' => 'error',
-                'message' => 'Email and password are required',
-                'received_data' => $data // For debugging
-            ]);
-            return;
-        }
+    //         // Validate required fields
+    //         if(empty($data['email']) || empty($data['password'])) {
+    //             echo json_encode([
+    //                 'status' => 'error',
+    //                 'message' => 'Email and password are required',
+    //                 'received_data' => $data // For debugging
+    //             ]);
+    //             return;
+    //         }
 
-        $sql = "SELECT u.*, r.role_name 
-                FROM users u 
-                LEFT JOIN roles r ON u.role_id = r.role_id 
-                WHERE u.email = :email AND u.is_active = 1";
-        $stmt = $conn->prepare($sql);
-        $stmt->bindValue(":email", $data['email']);
-        $stmt->execute();
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    //         $sql = "SELECT u.*, r.role_name 
+    //                 FROM users u 
+    //                 LEFT JOIN roles r ON u.role_id = r.role_id 
+    //                 WHERE u.email = :email AND u.is_active = 1";
+    //         $stmt = $conn->prepare($sql);
+    //         $stmt->bindValue(":email", $data['email']);
+    //         $stmt->execute();
+    //         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if($user && password_verify($data['password'], $user['password'])) {
-            // Remove sensitive data before returning
+    //         if($user && password_verify($data['password'], $user['password'])) {
+    //             // Remove sensitive data before returning
+    //             unset($user['password']);
+                
+    //             echo json_encode([
+    //                 'status' => 'success',
+    //                 'message' => 'Login successful',
+    //                 'data' => $user
+    //             ]);
+    //         } else {
+    //             echo json_encode([
+    //                 'status' => 'error',
+    //                 'message' => 'Invalid email or password'
+    //             ]);
+    //         }
+    //     } catch (PDOException $e) {
+    //         echo json_encode([
+    //             'status' => 'error',
+    //             'message' => 'Database error: ' . $e->getMessage()
+    //         ]);
+    //     } catch (Exception $e) {
+    //         echo json_encode([
+    //             'status' => 'error',
+    //             'message' => $e->getMessage()
+    //         ]);
+    //     }
+    // }
+    function login($input) {
+        include "connection-pdo.php";
+        
+        try {
+            $data = is_array($input) ? $input : json_decode($input, true);
+            
+            if(empty($data['email']) || empty($data['password'])) {
+                throw new Exception("Email and password are required");
+            }
+
+            $sql = "SELECT u.*, r.role_name 
+                    FROM users u 
+                    JOIN roles r ON u.role_id = r.role_id 
+                    WHERE u.email = :email";
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":email", $data['email']);
+            $stmt->execute();
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // Check if user exists
+            if(!$user) {
+                throw new Exception("Invalid email or password");
+            }
+
+            if(!$user['is_active']) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Account inactive'
+                ]);
+                return; 
+            }
+            // Verify password
+            if(!password_verify($data['password'], $user['password'])) {
+                throw new Exception("Invalid email or password");
+            }
+                
+            // For warehouse managers - check warehouse assignment
+            if ($user['role_name'] === 'warehouse_manager') {
+                $warehouseSql = "SELECT w.warehouse_id, w.warehouse_name 
+                            FROM assign_warehouse aw
+                            JOIN warehouses w ON aw.warehouse_id = w.warehouse_id
+                            WHERE aw.user_id = :userId AND aw.is_active = 1
+                            LIMIT 1";
+                $warehouseStmt = $conn->prepare($warehouseSql);
+                $warehouseStmt->bindValue(":userId", $user['user_id']);
+                $warehouseStmt->execute();
+                $warehouse = $warehouseStmt->fetch(PDO::FETCH_ASSOC);
+                
+                if (!$warehouse) {
+                    throw new Exception("No warehouse assigned to this manager");
+                }
+                
+                $user['warehouse_id'] = $warehouse['warehouse_id'];
+                $user['warehouse_name'] = $warehouse['warehouse_name'];
+            }
+            // For cashiers - check counter assignment
+            else if ($user['role_name'] === 'cashier') {
+                $counterSql = "SELECT c.counter_id, c.counter_name 
+                            FROM assign_sales ac
+                            JOIN counters c ON ac.counter_id = c.counter_id
+                            WHERE ac.user_id = :userId AND ac.is_active = 1
+                            LIMIT 1";
+                $counterStmt = $conn->prepare($counterSql);
+                $counterStmt->bindValue(":userId", $user['user_id']);
+                $counterStmt->execute();
+                $counter = $counterStmt->fetch(PDO::FETCH_ASSOC);
+                
+                if (!$counter) {
+                    throw new Exception("No sales counter assigned to this cashier");
+                }
+                
+                $user['counter_id'] = $counter['counter_id'];
+                $user['counter_name'] = $counter['counter_name'];
+            }
+
             unset($user['password']);
             
             echo json_encode([
@@ -335,24 +435,19 @@ class User {
                 'message' => 'Login successful',
                 'data' => $user
             ]);
-        } else {
+            
+        } catch (PDOException $e) {
             echo json_encode([
                 'status' => 'error',
-                'message' => 'Invalid email or password'
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        } catch (Exception $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => $e->getMessage()
             ]);
         }
-    } catch (PDOException $e) {
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'Database error: ' . $e->getMessage()
-        ]);
-    } catch (Exception $e) {
-        echo json_encode([
-            'status' => 'error',
-            'message' => $e->getMessage()
-        ]);
     }
-}
 
     // Check if email exists
     function checkEmail($json) {
