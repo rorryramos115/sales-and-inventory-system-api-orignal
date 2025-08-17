@@ -605,6 +605,117 @@ class Warehouse {
             ]);
         }
     }
+
+    function getWarehouseStock($json) {
+        include "connection-pdo.php";
+        
+        try {
+            $data = json_decode($json, true);
+            
+            if(empty($data['warehouse_id'])) {
+                throw new Exception("Warehouse ID is required");
+            }
+            
+            if(empty($data['user_id'])) {
+                throw new Exception("User ID is required for authorization");
+            }
+
+            // Verify user has access to this warehouse
+            $accessCheck = "SELECT COUNT(*) as count FROM assign_warehouse 
+                        WHERE warehouse_id = :warehouseId 
+                        AND user_id = :userId 
+                        AND is_active = 1";
+            $stmt = $conn->prepare($accessCheck);
+            $stmt->bindValue(":warehouseId", $data['warehouse_id']);
+            $stmt->bindValue(":userId", $data['user_id']);
+            $stmt->execute();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if($result['count'] == 0) {
+                throw new Exception("User not authorized to access this warehouse");
+            }
+
+            $sql = "SELECT ws.*, p.product_name, p.product_sku, p.description
+                    FROM warehouse_stock ws
+                    JOIN products p ON ws.product_id = p.product_id
+                    WHERE ws.warehouse_id = :warehouseId";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":warehouseId", $data['warehouse_id']);
+            $stmt->execute();
+            $stock = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Warehouse stock retrieved',
+                'data' => $stock
+            ]);
+        } catch (Exception $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    // Get stock for all warehouses a manager is assigned to
+    function getManagerWarehouseStock($json) {
+        include "connection-pdo.php";
+        
+        try {
+            $data = json_decode($json, true);
+            
+            if(empty($data['user_id'])) {
+                throw new Exception("User ID is required");
+            }
+
+            // First get all warehouses the user manages
+            $warehousesSql = "SELECT w.warehouse_id, w.warehouse_name
+                            FROM warehouses w
+                            JOIN assign_warehouse aw ON w.warehouse_id = aw.warehouse_id
+                            WHERE aw.user_id = :userId AND aw.is_active = 1";
+            
+            $stmt = $conn->prepare($warehousesSql);
+            $stmt->bindValue(":userId", $data['user_id']);
+            $stmt->execute();
+            $warehouses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            if(empty($warehouses)) {
+                throw new Exception("User is not assigned to any warehouses");
+            }
+
+            // Get stock for each warehouse
+            $result = [];
+            foreach($warehouses as $warehouse) {
+                $stockSql = "SELECT ws.*, p.product_name, p.product_code
+                            FROM warehouse_stock ws
+                            JOIN products p ON ws.product_id = p.product_id
+                            WHERE ws.warehouse_id = :warehouseId";
+                
+                $stmt = $conn->prepare($stockSql);
+                $stmt->bindValue(":warehouseId", $warehouse['warehouse_id']);
+                $stmt->execute();
+                $stock = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                $result[] = [
+                    'warehouse_id' => $warehouse['warehouse_id'],
+                    'warehouse_name' => $warehouse['warehouse_name'],
+                    'stock' => $stock
+                ];
+            }
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Warehouse stock retrieved',
+                'data' => $result
+            ]);
+        } catch (Exception $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
 
 // Handle the request
@@ -658,6 +769,12 @@ if ($operation === "createWarehouse") {
             break;
         case "getWarehousesByUserId":
             $warehouse->getWarehousesByUserId($json);
+            break;
+        case "getWarehouseStock":
+            $warehouse->getWarehouseStock($json);
+            break;
+        case "getManagerWarehouseStock":
+            $warehouse->getManagerWarehouseStock($json);
             break;
         default:
             echo json_encode([

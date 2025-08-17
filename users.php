@@ -29,7 +29,7 @@ class User {
             $sql = "SELECT u.*, r.role_name 
                     FROM users u 
                     LEFT JOIN roles r ON u.role_id = r.role_id 
-                    ORDER BY u.created_at DESC";
+                    ORDER BY u.full_name";
             $stmt = $conn->prepare($sql);
             $stmt->execute();
             $users = $stmt->fetchAll(PDO::FETCH_ASSOC);

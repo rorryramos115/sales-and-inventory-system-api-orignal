@@ -13,65 +13,14 @@ class Product {
         );
     }
 
-    private function generateBarcode() {
-        return 'PROD' . uniqid(); 
-    }
-
-    private function getBaseUrl() {
-        $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http";
-        $host = $_SERVER['HTTP_HOST'];
-        return "$protocol://$host/Sales-Inventory/backend";
-    }
-
-    private function handleFileUpload() {
-        if (empty($_FILES['product_image']['name'])) {
-            return '';
-        }
-
-        $uploadDir = __DIR__ . '/uploads/';
-        if (!file_exists($uploadDir)) {
-            if (!mkdir($uploadDir, 0755, true)) {
-                throw new Exception("Failed to create upload directory");
-            }
-        }
-        
-        // Validate file type and size
-        $fileInfo = getimagesize($_FILES['product_image']['tmp_name']);
-        if ($fileInfo === false) {
-            throw new Exception("Invalid image file");
-        }
-        
-        if ($_FILES['product_image']['size'] > 2 * 1024 * 1024) {
-            throw new Exception("File is too large. Max 2MB allowed.");
-        }
-        
-        $extension = strtolower(pathinfo($_FILES['product_image']['name'], PATHINFO_EXTENSION));
-        $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif'];
-        if (!in_array($extension, $allowedExtensions)) {
-            throw new Exception("Only JPG, JPEG, PNG & GIF files are allowed.");
-        }
-        
-        $fileName = uniqid() . '_' . preg_replace('/[^a-zA-Z0-9\.\-]/', '_', $_FILES['product_image']['name']);
-        $targetFile = $uploadDir . $fileName;
-        
-        if (!move_uploaded_file($_FILES['product_image']['tmp_name'], $targetFile)) {
-            throw new Exception("Failed to upload file");
-        }
-        
-        return $fileName;
-    }
-
     // Insert a new product (handles FormData)
     function insertProduct($data) {
         include "connection-pdo.php";
         $conn->beginTransaction();
 
         try {
-            // Handle file upload
-            $uploadedFile = $this->handleFileUpload();
-            
             // Validate required fields
-            $required = ['product_name', 'product_sku', 'selling_price'];
+            $required = ['product_name', 'barcode', 'selling_price'];
             foreach ($required as $field) {
                 if (empty($data[$field])) {
                     throw new Exception("Missing required field: $field");
@@ -83,37 +32,37 @@ class Product {
                 throw new Exception("Price must be a positive number");
             }
             
+            // Validate barcode
+            if (empty($data['barcode'])) {
+                throw new Exception("Barcode is required");
+            }
+            
             // Prepare data
             $productId = $this->generateUuid();
             $productName = $data['product_name'];
-            $productSku = $data['product_sku'];
+            $barcode = $data['barcode'];
             $sellingPrice = (float)$data['selling_price'];
             $categoryId = !empty($data['category_id']) ? $data['category_id'] : null;
             $description = $data['description'] ?? '';
             $isActive = $data['is_active'] ?? 1;
             
-            // Generate barcode if not provided
-            $barcode = empty($data['barcode']) ? $this->generateBarcode() : $data['barcode'];
-
             // Insert product
             $sql = "INSERT INTO products(
-                        product_id, product_sku, product_name, barcode, category_id, 
-                        selling_price, is_active, description, product_image
+                        product_id, product_name, barcode, category_id, 
+                        selling_price, is_active, description
                     ) VALUES(
-                        :productId, :productSku, :productName, :barcode, :categoryId, 
-                        :sellingPrice, :isActive, :description, :productImage
+                        :productId, :productName, :barcode, :categoryId, 
+                        :sellingPrice, :isActive, :description
                     )";
             
             $stmt = $conn->prepare($sql);
             $stmt->bindValue(":productId", $productId);
-            $stmt->bindValue(":productSku", $productSku);
             $stmt->bindValue(":productName", $productName);
             $stmt->bindValue(":barcode", $barcode);
             $stmt->bindValue(":categoryId", $categoryId, PDO::PARAM_STR);
             $stmt->bindValue(":sellingPrice", $sellingPrice);
             $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
             $stmt->bindValue(":description", $description);
-            $stmt->bindValue(":productImage", $uploadedFile);
             
             if (!$stmt->execute()) {
                 throw new Exception("Failed to create product");
@@ -121,20 +70,14 @@ class Product {
             
             $conn->commit();
             
-            // Return with full image URL
-            $imageUrl = $uploadedFile ? $this->getBaseUrl() . '/uploads/' . $uploadedFile : null;
-            
             return json_encode([
                 'status' => 'success',
                 'message' => 'Product created successfully',
                 'data' => [
                     'product_id' => $productId,
-                    'product_sku' => $productSku,
                     'product_name' => $productName,
                     'barcode' => $barcode,
-                    'selling_price' => $sellingPrice,
-                    'product_image' => $uploadedFile,
-                    'product_image_url' => $imageUrl
+                    'selling_price' => $sellingPrice
                 ]
             ]);
             
@@ -156,22 +99,9 @@ class Product {
             if (empty($data['product_id'])) {
                 throw new Exception("Product ID is required");
             }
-
-            // Handle file upload if new image provided
-            $uploadedFile = $this->handleFileUpload();
-            
-            // Get existing image if no new upload
-            if (empty($uploadedFile)) {
-                $sql = "SELECT product_image FROM products WHERE product_id = :productId";
-                $stmt = $conn->prepare($sql);
-                $stmt->bindValue(":productId", $data['product_id']);
-                $stmt->execute();
-                $result = $stmt->fetch(PDO::FETCH_ASSOC);
-                $uploadedFile = $result['product_image'] ?? '';
-            }
             
             // Validate required fields
-            $required = ['product_name', 'product_sku', 'selling_price'];
+            $required = ['product_name', 'barcode', 'selling_price'];
             foreach ($required as $field) {
                 if (empty($data[$field])) {
                     throw new Exception("Missing required field: $field");
@@ -180,30 +110,28 @@ class Product {
             
             // Prepare data
             $productName = $data['product_name'];
-            $productSku = $data['product_sku'];
+            $barcode = $data['barcode'];
             $sellingPrice = (float)$data['selling_price'];
             $categoryId = !empty($data['category_id']) ? $data['category_id'] : null;
             $description = $data['description'] ?? '';
             $isActive = $data['is_active'] ?? 1;
 
             $sql = "UPDATE products SET
-                        product_sku = :productSku,
                         product_name = :productName,
+                        barcode = :barcode,
                         category_id = :categoryId,
                         selling_price = :sellingPrice,
                         is_active = :isActive,
-                        description = :description,
-                        product_image = :productImage
+                        description = :description
                     WHERE product_id = :productId";
             
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":productSku", $productSku);
             $stmt->bindValue(":productName", $productName);
+            $stmt->bindValue(":barcode", $barcode);
             $stmt->bindValue(":categoryId", $categoryId, PDO::PARAM_STR);
             $stmt->bindValue(":sellingPrice", $sellingPrice);
             $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
             $stmt->bindValue(":description", $description);
-            $stmt->bindValue(":productImage", $uploadedFile);
             $stmt->bindValue(":productId", $data['product_id']);
             
             if (!$stmt->execute()) {
@@ -212,19 +140,14 @@ class Product {
             
             $conn->commit();
             
-            // Return with full image URL
-            $imageUrl = $uploadedFile ? $this->getBaseUrl() . '/uploads/' . $uploadedFile : null;
-            
             return json_encode([
                 'status' => 'success',
                 'message' => 'Product updated successfully',
                 'data' => [
                     'product_id' => $data['product_id'],
-                    'product_sku' => $productSku,
                     'product_name' => $productName,
-                    'selling_price' => $sellingPrice,
-                    'product_image' => $uploadedFile,
-                    'product_image_url' => $imageUrl
+                    'barcode' => $barcode,
+                    'selling_price' => $sellingPrice
                 ]
             ]);
             
@@ -237,23 +160,17 @@ class Product {
         }
     }
 
-    // Get all products with image URLs
+    // Get all products
     function getAllProducts() {
         include "connection-pdo.php";
 
         try {
-            $baseUrl = $this->getBaseUrl();
-            $sql = "SELECT p.*, c.category_name,
-                    CASE WHEN p.product_image IS NOT NULL 
-                         THEN CONCAT(:baseUrl, '/uploads/', p.product_image) 
-                         ELSE NULL 
-                    END as product_image_url
+            $sql = "SELECT p.*, c.category_name
                     FROM products p 
                     LEFT JOIN categories c ON p.category_id = c.category_id 
                     ORDER BY p.product_name";
             
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":baseUrl", $baseUrl);
             $stmt->execute();
             $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -270,7 +187,7 @@ class Product {
         }
     }
 
-    // Get a single product with image URL
+    // Get a single product
     function getProduct($json) {
         include "connection-pdo.php";
         
@@ -285,18 +202,12 @@ class Product {
                 return;
             }
 
-            $baseUrl = $this->getBaseUrl();
-            $sql = "SELECT p.*, c.category_name,
-                    CASE WHEN p.product_image IS NOT NULL 
-                         THEN CONCAT(:baseUrl, '/uploads/', p.product_image) 
-                         ELSE NULL 
-                    END as product_image_url
+            $sql = "SELECT p.*, c.category_name
                     FROM products p 
                     LEFT JOIN categories c ON p.category_id = c.category_id 
                     WHERE p.product_id = :productId";
             
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":baseUrl", $baseUrl);
             $stmt->bindValue(":productId", $json['product_id']);
             $stmt->execute();
             $product = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -363,36 +274,23 @@ class Product {
         }
     }
 
-    // Check if barcode or SKU exists
-    function checkBarcodeOrSku($json) {
+    // Check if barcode exists
+    function checkBarcode($json) {
         include "connection-pdo.php";
         
         try {
             $json = json_decode($json, true);
             
-            if(empty($json['barcode']) && empty($json['product_sku'])) {
+            if(empty($json['barcode'])) {
                 echo json_encode([
                     'status' => 'error',
-                    'message' => 'Missing required field: either barcode or product_sku is required'
+                    'message' => 'Missing required field: barcode is required'
                 ]);
                 return;
             }
 
-            $sql = "SELECT COUNT(*) as count FROM products WHERE ";
-            $conditions = [];
-            $params = [];
-            
-            if(!empty($json['barcode'])) {
-                $conditions[] = "barcode = :barcode";
-                $params[':barcode'] = $json['barcode'];
-            }
-            
-            if(!empty($json['product_sku'])) {
-                $conditions[] = "product_sku = :productSku";
-                $params[':productSku'] = $json['product_sku'];
-            }
-            
-            $sql .= implode(" OR ", $conditions);
+            $sql = "SELECT COUNT(*) as count FROM products WHERE barcode = :barcode";
+            $params = [':barcode' => $json['barcode']];
             
             if(isset($json['product_id'])) {
                 $sql .= " AND product_id != :productId";
@@ -412,8 +310,7 @@ class Product {
                 'message' => 'Check completed',
                 'data' => [
                     'exists' => $rs['count'] > 0,
-                    'barcode' => $json['barcode'] ?? null,
-                    'product_sku' => $json['product_sku'] ?? null
+                    'barcode' => $json['barcode']
                 ]
             ]);
         } catch (PDOException $e) {
@@ -424,7 +321,7 @@ class Product {
         }
     }
 
-    // Search products by name, SKU or barcode
+    // Search products by name or barcode
     function searchProducts($json) {
         include "connection-pdo.php";
         
@@ -439,23 +336,16 @@ class Product {
                 return;
             }
 
-            $baseUrl = $this->getBaseUrl();
             $searchTerm = '%' . $json['search_term'] . '%';
-            $sql = "SELECT p.*, c.category_name,
-                    CASE WHEN p.product_image IS NOT NULL 
-                         THEN CONCAT(:baseUrl, '/uploads/', p.product_image) 
-                         ELSE NULL 
-                    END as product_image_url
+            $sql = "SELECT p.*, c.category_name
                     FROM products p 
                     LEFT JOIN categories c ON p.category_id = c.category_id 
                     WHERE p.product_name LIKE :searchTerm 
-                    OR p.product_sku LIKE :searchTerm
                     OR p.barcode LIKE :searchTerm
                     ORDER BY p.product_name
                     LIMIT 20";
             
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":baseUrl", $baseUrl);
             $stmt->bindValue(":searchTerm", $searchTerm);
             $stmt->execute();
             $rs = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -472,8 +362,54 @@ class Product {
             ]);
         }
     }
+
+    // Add this method to your Product class
+    function getAvailableProductsForSupplier($json) {
+        include "connection-pdo.php";
+        
+        try {
+            $json = json_decode($json, true);
+            
+            if(empty($json['supplier_id'])) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Missing required field: supplier_id is required'
+                ]);
+                return;
+            }
+
+            $sql = "SELECT p.*, c.category_name
+                    FROM products p 
+                    LEFT JOIN categories c ON p.category_id = c.category_id 
+                    WHERE p.is_active = 1
+                    AND p.product_id NOT IN (
+                        SELECT product_id 
+                        FROM supplier_products 
+                        WHERE supplier_id = :supplierId
+                        AND is_active = 1
+                    )
+                    ORDER BY p.product_name";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":supplierId", $json['supplier_id']);
+            $stmt->execute();
+            $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Available products retrieved successfully',
+                'data' => $products
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
 }
 
+// Request handling remains the same as before
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $operation = $_GET['operation'] ?? '';
     $json = $_GET['json'] ?? '{}';
@@ -505,10 +441,6 @@ try {
         
         echo $product->$operation($data);
     } else {
-        // $json = $_SERVER['REQUEST_METHOD'] === 'GET' 
-        //     ? ($_GET['json'] ?? '') 
-        //     : (file_get_contents('php://input') ?: '');
-        
         switch($operation) {
             case "getAllProducts":
                 echo $product->getAllProducts();
@@ -519,11 +451,14 @@ try {
             case "deleteProduct":
                 echo $product->deleteProduct($json);
                 break;
-            case "checkBarcodeOrSku":
-                echo $product->checkBarcodeOrSku($json);
+            case "checkBarcode":
+                echo $product->checkBarcode($json);
                 break;
             case "searchProducts":
                 echo $product->searchProducts($json);
+                break;
+            case "getAvailableProductsForSupplier":
+                echo $product->getAvailableProductsForSupplier($json);
                 break;
             default:
                 echo json_encode([
