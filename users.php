@@ -82,14 +82,16 @@ class User {
             $phone = $data['phone'] ?? null;
             $roleId = $data['role_id'];
             $isActive = isset($data['is_active']) ? (int)$data['is_active'] : 1;
+            // New users must change password on first login
+            $mustChangePassword = 1;
 
             // Insert user
             $sql = "INSERT INTO users(
                         user_id, full_name, email, password, phone, 
-                        role_id, is_active
+                        role_id, is_active, must_change_password
                     ) VALUES(
                         :userId, :fullName, :email, :password, :phone, 
-                        :roleId, :isActive
+                        :roleId, :isActive, :mustChangePassword
                     )";
             
             $stmt = $conn->prepare($sql);
@@ -100,6 +102,7 @@ class User {
             $stmt->bindValue(":phone", $phone);
             $stmt->bindValue(":roleId", $roleId, PDO::PARAM_STR);
             $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
+            $stmt->bindValue(":mustChangePassword", $mustChangePassword, PDO::PARAM_INT);
             
             if (!$stmt->execute()) {
                 throw new Exception("Failed to create user");
@@ -296,63 +299,6 @@ class User {
         }
     }
 
-    // function login($input) {
-    //     include "connection-pdo.php";
-        
-    //     try {
-    //         // Handle both array and JSON string input
-    //         $data = is_array($input) ? $input : json_decode($input, true);
-            
-    //         if (json_last_error() !== JSON_ERROR_NONE && !is_array($input)) {
-    //             throw new Exception("Invalid JSON data");
-    //         }
-
-    //         // Validate required fields
-    //         if(empty($data['email']) || empty($data['password'])) {
-    //             echo json_encode([
-    //                 'status' => 'error',
-    //                 'message' => 'Email and password are required',
-    //                 'received_data' => $data // For debugging
-    //             ]);
-    //             return;
-    //         }
-
-    //         $sql = "SELECT u.*, r.role_name 
-    //                 FROM users u 
-    //                 LEFT JOIN roles r ON u.role_id = r.role_id 
-    //                 WHERE u.email = :email AND u.is_active = 1";
-    //         $stmt = $conn->prepare($sql);
-    //         $stmt->bindValue(":email", $data['email']);
-    //         $stmt->execute();
-    //         $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    //         if($user && password_verify($data['password'], $user['password'])) {
-    //             // Remove sensitive data before returning
-    //             unset($user['password']);
-                
-    //             echo json_encode([
-    //                 'status' => 'success',
-    //                 'message' => 'Login successful',
-    //                 'data' => $user
-    //             ]);
-    //         } else {
-    //             echo json_encode([
-    //                 'status' => 'error',
-    //                 'message' => 'Invalid email or password'
-    //             ]);
-    //         }
-    //     } catch (PDOException $e) {
-    //         echo json_encode([
-    //             'status' => 'error',
-    //             'message' => 'Database error: ' . $e->getMessage()
-    //         ]);
-    //     } catch (Exception $e) {
-    //         echo json_encode([
-    //             'status' => 'error',
-    //             'message' => $e->getMessage()
-    //         ]);
-    //     }
-    // }
     function login($input) {
         include "connection-pdo.php";
         
@@ -384,10 +330,12 @@ class User {
                 ]);
                 return; 
             }
+            
             // Verify password
             if(!password_verify($data['password'], $user['password'])) {
                 throw new Exception("Invalid email or password");
             }
+
                 
             // For warehouse managers - check warehouse assignment
             if ($user['role_name'] === 'warehouse_manager') {
@@ -408,24 +356,16 @@ class User {
                 $user['warehouse_id'] = $warehouse['warehouse_id'];
                 $user['warehouse_name'] = $warehouse['warehouse_name'];
             }
-            // For cashiers - check counter assignment
-            else if ($user['role_name'] === 'cashier') {
-                $counterSql = "SELECT c.counter_id, c.counter_name 
-                            FROM assign_sales ac
-                            JOIN counters c ON ac.counter_id = c.counter_id
-                            WHERE ac.user_id = :userId AND ac.is_active = 1
-                            LIMIT 1";
-                $counterStmt = $conn->prepare($counterSql);
-                $counterStmt->bindValue(":userId", $user['user_id']);
-                $counterStmt->execute();
-                $counter = $counterStmt->fetch(PDO::FETCH_ASSOC);
-                
-                if (!$counter) {
-                    throw new Exception("No sales counter assigned to this cashier");
-                }
-                
-                $user['counter_id'] = $counter['counter_id'];
-                $user['counter_name'] = $counter['counter_name'];
+
+            // Check if user must change password
+            if ($user['must_change_password']) {
+                unset($user['password']);
+                echo json_encode([
+                    'status' => 'password_change_required',
+                    'message' => 'Password change required for first login',
+                    'data' => $user
+                ]);
+                return;
             }
 
             unset($user['password']);
@@ -442,6 +382,110 @@ class User {
                 'message' => 'Database error: ' . $e->getMessage()
             ]);
         } catch (Exception $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    // Change password for first login
+    function changeFirstLoginPassword($data) {
+        include "connection-pdo.php";
+        $conn->beginTransaction();
+        
+        try {
+            $required = ['user_id', 'current_password', 'new_password'];
+            foreach ($required as $field) {
+                if (empty($data[$field])) {
+                    throw new Exception("Missing required field: $field");
+                }
+            }
+
+            // Get user data
+            $sql = "SELECT * FROM users WHERE user_id = :userId";
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":userId", $data['user_id']);
+            $stmt->execute();
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$user) {
+                throw new Exception("User not found");
+            }
+
+            // Verify current password
+            if (!password_verify($data['current_password'], $user['password'])) {
+                throw new Exception("Current password is incorrect");
+            }
+
+            // Validate new password
+            if (strlen($data['new_password']) < 8) {
+                throw new Exception("New password must be at least 8 characters long");
+            }
+
+            // Check if new password is different from current
+            if (password_verify($data['new_password'], $user['password'])) {
+                throw new Exception("New password must be different from current password");
+            }
+
+            // Hash new password
+            $hashedPassword = password_hash($data['new_password'], PASSWORD_DEFAULT);
+
+            // Get updated user with role information for login
+            $sql = "SELECT u.*, r.role_name 
+                    FROM users u 
+                    JOIN roles r ON u.role_id = r.role_id 
+                    WHERE u.user_id = :userId";
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":userId", $data['user_id']);
+            $stmt->execute();
+            $updatedUser = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // For warehouse managers - get warehouse assignment
+            if ($updatedUser['role_name'] === 'warehouse_manager') {
+                $warehouseSql = "SELECT w.warehouse_id, w.warehouse_name 
+                            FROM assign_warehouse aw
+                            JOIN warehouses w ON aw.warehouse_id = w.warehouse_id
+                            WHERE aw.user_id = :userId AND aw.is_active = 1
+                            LIMIT 1";
+                $warehouseStmt = $conn->prepare($warehouseSql);
+                $warehouseStmt->bindValue(":userId", $updatedUser['user_id']);
+                $warehouseStmt->execute();
+                $warehouse = $warehouseStmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($warehouse) {
+                    $updatedUser['warehouse_id'] = $warehouse['warehouse_id'];
+                    $updatedUser['warehouse_name'] = $warehouse['warehouse_name'];
+                }
+            }
+
+             // Update password and clear must_change_password flag
+            $updateSql = "UPDATE users SET 
+                            password = :newPassword, 
+                            must_change_password = 0,
+                            updated_at = CURRENT_TIMESTAMP
+                          WHERE user_id = :userId";
+            
+            $updateStmt = $conn->prepare($updateSql);
+            $updateStmt->bindValue(":newPassword", $hashedPassword);
+            $updateStmt->bindValue(":userId", $data['user_id']);
+            
+            if (!$updateStmt->execute()) {
+                throw new Exception("Failed to update password");
+            }
+
+            $conn->commit();
+
+            unset($updatedUser['password']);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Password changed successfully',
+                'data' => $updatedUser
+            ]);
+
+        } catch (Exception $e) {
+            $conn->rollBack();
             echo json_encode([
                 'status' => 'error',
                 'message' => $e->getMessage()
@@ -496,7 +540,7 @@ class User {
         }
     }
 
-    // Add this method to your User class
+    // Search users
     function searchUsers($json) {
         include "connection-pdo.php";
         
@@ -543,6 +587,64 @@ class User {
             ]);
         }
     }
+
+    // Count active and inactive users
+    // function countUserStatus() {
+    //     include "connection-pdo.php";
+
+    //     try {
+    //         $sql = "SELECT 
+    //                     SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_users,
+    //                     SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) as inactive_users,
+    //                     COUNT(*) as total_users
+    //                 FROM users";
+            
+    //         $stmt = $conn->prepare($sql);
+    //         $stmt->execute();
+    //         $counts = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    //         echo json_encode([
+    //             'status' => 'success',
+    //             'message' => 'User counts retrieved successfully',
+    //             'data' => $counts
+    //         ]);
+    //     } catch (PDOException $e) {
+    //         echo json_encode([
+    //             'status' => 'error',
+    //             'message' => 'Database error: ' . $e->getMessage()
+    //         ]);
+    //     }
+    // }
+
+    // Count user status with role information
+function countUserStatus() {
+    include "connection-pdo.php";
+
+    try {
+        $sql = "SELECT 
+                    SUM(CASE WHEN u.is_active = 1 THEN 1 ELSE 0 END) as active_users,
+                    SUM(CASE WHEN u.is_active = 0 THEN 1 ELSE 0 END) as inactive_users,
+                    SUM(CASE WHEN r.role_name = 'admin' THEN 1 ELSE 0 END) as admin_users,
+                    COUNT(*) as total_users
+                FROM users u
+                LEFT JOIN roles r ON u.role_id = r.role_id";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->execute();
+        $counts = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'User counts retrieved successfully',
+            'data' => $counts
+        ]);
+    } catch (PDOException $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Database error: ' . $e->getMessage()
+        ]);
+    }
+}
 }
 
 $user = new User();
@@ -572,6 +674,12 @@ switch ($operation) {
     case "login":
         echo $user->login($data);
         break;
+    case "changeFirstLoginPassword":
+        echo $user->changeFirstLoginPassword($data);
+        break;
+    case "countUserStatus":
+        echo $user->countUserStatus();
+        break;
     case "getAllUsers":
         echo $user->getAllUsers();
         break;
@@ -599,6 +707,7 @@ switch ($operation) {
                 'insertUser', 
                 'updateUser', 
                 'login', 
+                'changeFirstLoginPassword',
                 'getAllUsers', 
                 'getUser', 
                 'deleteUser', 

@@ -407,6 +407,55 @@ class Product {
             ]);
         }
     }
+
+    // Add this method to your Product class
+    function getSupplierProducts($json) {
+        include "connection-pdo.php";
+        
+        try {
+            $json = json_decode($json, true);
+            
+            if(empty($json['supplier_id'])) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Missing required field: supplier_id is required'
+                ]);
+                return;
+            }
+
+            $sql = "SELECT 
+                        p.product_id,
+                        p.product_name,
+                        p.barcode,
+                        p.selling_price,
+                        p.description,
+                        p.is_active as product_active,
+                        c.category_name,
+                        sp.supplier_product_id,
+                        sp.is_active as supplier_product_active
+                    FROM supplier_products sp
+                    JOIN products p ON sp.product_id = p.product_id
+                    LEFT JOIN categories c ON p.category_id = c.category_id
+                    WHERE sp.supplier_id = :supplierId
+                    ORDER BY p.product_name";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":supplierId", $json['supplier_id']);
+            $stmt->execute();
+            $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Supplier products retrieved successfully',
+                'data' => $products
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
 }
 
 // Request handling remains the same as before
@@ -459,6 +508,9 @@ try {
                 break;
             case "getAvailableProductsForSupplier":
                 echo $product->getAvailableProductsForSupplier($json);
+                break;
+            case "getSupplierProducts":
+                echo $product->getSupplierProducts($json);
                 break;
             default:
                 echo json_encode([

@@ -635,7 +635,7 @@ class Warehouse {
                 throw new Exception("User not authorized to access this warehouse");
             }
 
-            $sql = "SELECT ws.*, p.product_name, p.product_sku, p.description
+            $sql = "SELECT ws.*, p.product_name, p.barcode, p.description
                     FROM warehouse_stock ws
                     JOIN products p ON ws.product_id = p.product_id
                     WHERE ws.warehouse_id = :warehouseId";

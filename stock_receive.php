@@ -17,10 +17,9 @@ class StockIn {
     // Create purchase order and automatically receive stock (direct transaction)
     function createOrderAndReceiveStock($data) {
         include "connection-pdo.php";
-        $conn->beginTransaction(); // Start transaction
+        $conn->beginTransaction();
 
         try {
-            // Validate required fields
             if (empty($data['supplier_id'])) {
                 throw new Exception("Supplier ID is required");
             }
@@ -38,14 +37,12 @@ class StockIn {
             $orderId = $this->generateUuid();
             $receiveId = $this->generateUuid();
             
-            // Generate receipt code (format: RC-YYYYMMDD-XXXX)
             $receiptCode = 'RC-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -4));
             
             // Prepare data
             $orderDate = $data['order_date'] ?? date('Y-m-d');
             $receiveDate = $data['receive_date'] ?? date('Y-m-d');
-            $notes = $data['notes'] ?? null;
-            $supplierInvoice = $data['reference'] ?? null; // Using 'reference' from frontend as supplier_invoice
+            $supplierInvoice = $data['reference'] ?? null;
             
             // Calculate total amount
             $totalAmount = 0;
@@ -59,10 +56,10 @@ class StockIn {
             // Insert purchase order
             $orderSql = "INSERT INTO product_orders(
                             order_id, supplier_id, order_date, total_amount, 
-                            notes, created_by
+                            created_by
                         ) VALUES(
                             :orderId, :supplierId, :orderDate, :totalAmount, 
-                            :notes, :createdBy
+                            :createdBy
                         )";
             
             $orderStmt = $conn->prepare($orderSql);
@@ -70,7 +67,6 @@ class StockIn {
             $orderStmt->bindValue(":supplierId", $data['supplier_id']);
             $orderStmt->bindValue(":orderDate", $orderDate);
             $orderStmt->bindValue(":totalAmount", $totalAmount);
-            $orderStmt->bindValue(":notes", $notes);
             $orderStmt->bindValue(":createdBy", $data['created_by']);
             
             if (!$orderStmt->execute()) {
@@ -80,10 +76,10 @@ class StockIn {
             // Insert stock receive record (automatic)
             $receiveSql = "INSERT INTO stock_receive(
                             receive_id, receipt_code, supplier_invoice, order_id, 
-                            receive_date, supplier_id, warehouse_id, received_by, notes
+                            receive_date, supplier_id, warehouse_id, received_by, total_amount
                         ) VALUES(
                             :receiveId, :receiptCode, :supplierInvoice, :orderId, 
-                            :receiveDate, :supplierId, :warehouseId, :receivedBy, :notes
+                            :receiveDate, :supplierId, :warehouseId, :receivedBy, :totalAmount
                         )";
             
             $receiveStmt = $conn->prepare($receiveSql);
@@ -95,7 +91,7 @@ class StockIn {
             $receiveStmt->bindValue(":supplierId", $data['supplier_id']);
             $receiveStmt->bindValue(":warehouseId", $data['warehouse_id']);
             $receiveStmt->bindValue(":receivedBy", $data['created_by']);
-            $receiveStmt->bindValue(":notes", $notes);
+            $receiveStmt->bindValue(":totalAmount", $totalAmount);
             
             if (!$receiveStmt->execute()) {
                 throw new Exception("Failed to create stock receive record");
@@ -148,17 +144,11 @@ class StockIn {
                     throw new Exception("Failed to create receive item");
                 }
 
-                // Update warehouse stock immediately
                 $this->updateWarehouseStock($conn, $data['warehouse_id'], $item['product_id'], 
                                         $item['quantity'], $item['unit_price']);
-
-                // Create stock movement record
-                $this->createStockMovement($conn, $item['product_id'], $data['warehouse_id'], 
-                                        'stock_in', $item['quantity'], $receiveId, 
-                                        'stock_receive', $data['created_by']);
             }
             
-            $conn->commit(); // Commit transaction
+            $conn->commit();
             
             return json_encode([
                 'status' => 'success',
@@ -185,7 +175,6 @@ class StockIn {
         }
     }
 
-    // Helper function to update warehouse stock only (no product_stock)
     private function updateWarehouseStock($conn, $warehouseId, $productId, $quantity, $unitCost) {
         // Check if stock record exists
         $checkSql = "SELECT stock_id, quantity FROM warehouse_stock 
@@ -225,46 +214,216 @@ class StockIn {
         }
     }
 
-    // Helper function to create stock movement record
-    private function createStockMovement($conn, $productId, $warehouseId, $movementType, 
-                                       $quantity, $referenceId, $referenceTable, $createdBy) {
-        $movementId = $this->generateUuid();
-        $sql = "INSERT INTO stock_movements(
-                   movement_id, product_id, warehouse_id, movement_type, 
-                   quantity, reference_id, reference_table, created_by
-               ) VALUES(
-                   :movementId, :productId, :warehouseId, :movementType, 
-                   :quantity, :referenceId, :referenceTable, :createdBy
-               )";
-        
-        $stmt = $conn->prepare($sql);
-        $stmt->bindValue(":movementId", $movementId);
-        $stmt->bindValue(":productId", $productId);
-        $stmt->bindValue(":warehouseId", $warehouseId);
-        $stmt->bindValue(":movementType", $movementType);
-        $stmt->bindValue(":quantity", $quantity, PDO::PARAM_INT);
-        $stmt->bindValue(":referenceId", $referenceId);
-        $stmt->bindValue(":referenceTable", $referenceTable);
-        $stmt->bindValue(":createdBy", $createdBy);
-        $stmt->execute();
-    }
-
-    // Helper function to update order item received quantity (removed - not needed for direct transactions)
-    // Orders are automatically fulfilled, no need to track received quantities separately
-
-    // Get all orders with their receive status
-    function getAllOrdersWithReceives() {
+     // Get all product orders with complete details and items
+    function getAllProductOrders() {
         include "connection-pdo.php";
 
         try {
-            $sql = "SELECT po.*, s.supplier_name, u.full_name as created_by_name,
-                           sr.receive_id, sr.receive_date
+            $sql = "SELECT 
+                        po.order_id,
+                        po.order_date,
+                        po.total_amount,
+                        po.created_at,
+                        po.updated_at,
+                        
+                        -- Supplier information
+                        s.supplier_id,
+                        s.supplier_name,
+                        s.contact_person,
+                        s.phone as supplier_phone,
+                        s.email as supplier_email,
+                        s.address as supplier_address,
+                        
+                        -- Created by user information
+                        u.user_id as created_by_id,
+                        u.full_name as created_by_name,
+                        u.email as created_by_email,
+                        u.phone as created_by_phone
+                        
                     FROM product_orders po
-                    JOIN suppliers s ON po.supplier_id = s.supplier_id
-                    JOIN users u ON po.created_by = u.user_id
-                    LEFT JOIN stock_receive sr ON po.order_id = sr.order_id
-                    ORDER BY po.order_date DESC";
+                    INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
+                    INNER JOIN users u ON po.created_by = u.user_id
+                    ORDER BY po.order_date DESC, po.created_at DESC";
+
             $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Get order items for each order
+            foreach ($orders as &$order) {
+                $itemsSql = "SELECT 
+                                poi.order_item_id,
+                                poi.product_id,
+                                poi.quantity,
+                                poi.unit_price,
+                                poi.total_price,
+                                poi.created_at as order_item_created_at,
+                                
+                                -- Product information
+                                p.product_name,
+                                p.barcode,
+                                p.description as product_description,
+                                p.selling_price,
+                                
+                                -- Category information (if exists)
+                                c.category_id,
+                                c.category_name
+                                
+                            FROM product_order_items poi
+                            INNER JOIN products p ON poi.product_id = p.product_id
+                            LEFT JOIN categories c ON p.category_id = c.category_id
+                            WHERE poi.order_id = :orderId
+                            ORDER BY poi.created_at ASC";
+                
+                $itemsStmt = $conn->prepare($itemsSql);
+                $itemsStmt->bindValue(":orderId", $order['order_id']);
+                $itemsStmt->execute();
+                $order['items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+            }
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'All product orders retrieved successfully',
+                'data' => [
+                    'total_orders' => count($orders),
+                    'orders' => $orders
+                ]
+            ]);
+            
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    // Get single product order with items
+    function getProductOrder($json) {
+        include "connection-pdo.php";
+        
+        try {
+            $data = json_decode($json, true);
+            
+            if(empty($data['order_id'])) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Missing required field: order_id'
+                ]);
+                return;
+            }
+
+            $sql = "SELECT 
+                        po.order_id,
+                        po.order_date,
+                        po.total_amount,
+                        po.created_at,
+                        po.updated_at,
+                        
+                        -- Supplier information
+                        s.supplier_id,
+                        s.supplier_name,
+                        s.contact_person,
+                        s.phone as supplier_phone,
+                        s.email as supplier_email,
+                        s.address as supplier_address,
+                        
+                        -- Created by user information
+                        u.user_id as created_by_id,
+                        u.full_name as created_by_name,
+                        u.email as created_by_email
+                        
+                    FROM product_orders po
+                    INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
+                    INNER JOIN users u ON po.created_by = u.user_id
+                    WHERE po.order_id = :orderId";
+
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":orderId", $data['order_id']);
+            $stmt->execute();
+            $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$order) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Order not found'
+                ]);
+                return;
+            }
+
+            // Get order items
+            $itemsSql = "SELECT 
+                            poi.order_item_id,
+                            poi.product_id,
+                            poi.quantity,
+                            poi.unit_price,
+                            poi.total_price,
+                            
+                            -- Product information
+                            p.product_name,
+                            p.barcode,
+                            p.description as product_description,
+                            p.selling_price
+                            
+                        FROM product_order_items poi
+                        INNER JOIN products p ON poi.product_id = p.product_id
+                        WHERE poi.order_id = :orderId
+                        ORDER BY poi.created_at ASC";
+            
+            $itemsStmt = $conn->prepare($itemsSql);
+            $itemsStmt->bindValue(":orderId", $data['order_id']);
+            $itemsStmt->execute();
+            $order['items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Product order retrieved successfully',
+                'data' => $order
+            ]);
+            
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    // Get orders by supplier
+    function getOrdersBySupplier($json) {
+        include "connection-pdo.php";
+        
+        try {
+            $data = json_decode($json, true);
+            
+            if(empty($data['supplier_id'])) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Missing required field: supplier_id'
+                ]);
+                return;
+            }
+
+            $sql = "SELECT 
+                        po.order_id,
+                        po.order_date,
+                        po.total_amount,
+                        po.created_at,
+                        
+                        -- Supplier information
+                        s.supplier_name,
+                        
+                        -- Created by user information
+                        u.full_name as created_by_name
+                        
+                    FROM product_orders po
+                    INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
+                    INNER JOIN users u ON po.created_by = u.user_id
+                    WHERE po.supplier_id = :supplierId
+                    ORDER BY po.order_date DESC";
+
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":supplierId", $data['supplier_id']);
             $stmt->execute();
             $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -273,6 +432,7 @@ class StockIn {
                 'message' => 'Orders retrieved successfully',
                 'data' => $orders
             ]);
+            
         } catch (PDOException $e) {
             echo json_encode([
                 'status' => 'error',
@@ -281,90 +441,95 @@ class StockIn {
         }
     }
 
-    // Get all stock receive records
-    // function getAllStockReceives() {
-    //     include "connection-pdo.php";
-
-    //     try {
-    //         $sql = "SELECT sr.*, s.supplier_name, w.warehouse_name, u.full_name as received_by_name
-    //                 FROM stock_receive sr
-    //                 JOIN suppliers s ON sr.supplier_id = s.supplier_id
-    //                 JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-    //                 JOIN users u ON sr.received_by = u.user_id
-    //                 ORDER BY sr.receive_date DESC";
-    //         $stmt = $conn->prepare($sql);
-    //         $stmt->execute();
-    //         $receives = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    //         echo json_encode([
-    //             'status' => 'success',
-    //             'message' => 'Stock receives retrieved successfully',
-    //             'data' => $receives
-    //         ]);
-    //     } catch (PDOException $e) {
-    //         echo json_encode([
-    //             'status' => 'error',
-    //             'message' => 'Database error: ' . $e->getMessage()
-    //         ]);
-    //     }
-    // }
-        function getAllStockReceives() {
+    // Get all stock receives with complete details and items
+    function getAllStockReceives() {
         include "connection-pdo.php";
 
         try {
-            // First get all stock receives with basic info
-            $sql = "SELECT sr.*, s.supplier_name, w.warehouse_name, u.full_name as received_by_name,
-                        po.order_date, po.total_amount as order_total_amount
+            $sql = "SELECT 
+                        sr.receive_id,
+                        sr.receipt_code,
+                        sr.supplier_invoice,
+                        sr.order_id,
+                        sr.receive_date,
+                        sr.total_amount,
+                        sr.created_at,
+                        sr.updated_at,
+                        
+                        -- Supplier information
+                        s.supplier_id,
+                        s.supplier_name,
+                        s.contact_person,
+                        s.phone as supplier_phone,
+                        s.email as supplier_email,
+                        s.address as supplier_address,
+                        
+                        -- Warehouse information
+                        w.warehouse_id,
+                        w.warehouse_name,
+                        
+                        -- Received by user information
+                        u.user_id as received_by_id,
+                        u.full_name as received_by_name,
+                        u.email as received_by_email,
+                        
+                        -- Order information (if linked)
+                        po.order_date,
+                        po.total_amount as order_total_amount
+                        
                     FROM stock_receive sr
-                    JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-                    JOIN users u ON sr.received_by = u.user_id
+                    INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
+                    INNER JOIN users u ON sr.received_by = u.user_id
                     LEFT JOIN product_orders po ON sr.order_id = po.order_id
-                    ORDER BY sr.receive_date DESC";
+                    ORDER BY sr.receive_date DESC, sr.created_at DESC";
             
             $stmt = $conn->prepare($sql);
             $stmt->execute();
             $receives = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Now get items for each receive
+            // Get receive items for each receive
             foreach ($receives as &$receive) {
-                $itemsSql = "SELECT 
-                                poi.order_item_id, poi.product_id, poi.quantity, 
-                                poi.unit_price, poi.total_price,
-                                p.product_name, p.product_sku, p.barcode
-                            FROM product_order_items poi
-                            JOIN products p ON poi.product_id = p.product_id
-                            WHERE poi.order_id = :orderId";
-                
-                $itemsStmt = $conn->prepare($itemsSql);
-                $itemsStmt->bindValue(":orderId", $receive['order_id']);
-                $itemsStmt->execute();
-                $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-                
-                $receive['order_items'] = $items;
-                
-                // Also get stock receive items if needed
                 $receiveItemsSql = "SELECT 
-                                    sri.receive_item_id, sri.product_id, sri.quantity, 
-                                    sri.unit_price, (sri.quantity * sri.unit_price) as total_price,
-                                    p.product_name, p.product_sku, p.barcode
+                                    sri.receive_item_id,
+                                    sri.product_id,
+                                    sri.quantity,
+                                    sri.unit_price,
+                                    (sri.quantity * sri.unit_price) as total_price,
+                                    sri.batch_number,
+                                    sri.created_at as receive_item_created_at,
+                                    
+                                    -- Product information
+                                    p.product_name,
+                                    p.barcode,
+                                    p.description as product_description,
+                                    p.selling_price,
+                                    
+                                    -- Category information (if exists)
+                                    c.category_id,
+                                    c.category_name
+                                    
                                     FROM stock_receive_items sri
-                                    JOIN products p ON sri.product_id = p.product_id
-                                    WHERE sri.receive_id = :receiveId";
+                                    INNER JOIN products p ON sri.product_id = p.product_id
+                                    LEFT JOIN categories c ON p.category_id = c.category_id
+                                    WHERE sri.receive_id = :receiveId
+                                    ORDER BY sri.created_at ASC";
                 
                 $receiveItemsStmt = $conn->prepare($receiveItemsSql);
                 $receiveItemsStmt->bindValue(":receiveId", $receive['receive_id']);
                 $receiveItemsStmt->execute();
-                $receiveItems = $receiveItemsStmt->fetchAll(PDO::FETCH_ASSOC);
-                
-                $receive['receive_items'] = $receiveItems;
+                $receive['items'] = $receiveItemsStmt->fetchAll(PDO::FETCH_ASSOC);
             }
 
             echo json_encode([
                 'status' => 'success',
-                'message' => 'Stock receives retrieved successfully with order and receive items',
-                'data' => $receives
+                'message' => 'All stock receives retrieved successfully',
+                'data' => [
+                    'total_receives' => count($receives),
+                    'receives' => $receives
+                ]
             ]);
+            
         } catch (PDOException $e) {
             echo json_encode([
                 'status' => 'error',
@@ -373,14 +538,14 @@ class StockIn {
         }
     }
 
-    // Get stock receive with items
+    // Get single stock receive with items
     function getStockReceive($json) {
         include "connection-pdo.php";
         
         try {
-            $json = json_decode($json, true);
+            $data = json_decode($json, true);
             
-            if(empty($json['receive_id'])) {
+            if(empty($data['receive_id'])) {
                 echo json_encode([
                     'status' => 'error',
                     'message' => 'Missing required field: receive_id'
@@ -388,19 +553,44 @@ class StockIn {
                 return;
             }
 
-            // Get receive record
-            $sql = "SELECT sr.*, s.supplier_name, w.warehouse_name, u.full_name as received_by_name
+            $sql = "SELECT 
+                        sr.receive_id,
+                        sr.receipt_code,
+                        sr.supplier_invoice,
+                        sr.order_id,
+                        sr.receive_date,
+                        sr.total_amount,
+                        sr.created_at,
+                        sr.updated_at,
+                        
+                        -- Supplier information
+                        s.supplier_id,
+                        s.supplier_name,
+                        s.contact_person,
+                        s.phone as supplier_phone,
+                        s.email as supplier_email,
+                        
+                        -- Warehouse information
+                        w.warehouse_id,
+                        w.warehouse_name,
+                        
+                        -- Received by user information
+                        u.user_id as received_by_id,
+                        u.full_name as received_by_name,
+                        u.email as received_by_email
+                        
                     FROM stock_receive sr
-                    JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-                    JOIN users u ON sr.received_by = u.user_id
+                    INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
+                    INNER JOIN users u ON sr.received_by = u.user_id
                     WHERE sr.receive_id = :receiveId";
+
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":receiveId", $json['receive_id']);
+            $stmt->bindValue(":receiveId", $data['receive_id']);
             $stmt->execute();
             $receive = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if(!$receive) {
+            if (!$receive) {
                 echo json_encode([
                     'status' => 'error',
                     'message' => 'Stock receive record not found'
@@ -409,22 +599,35 @@ class StockIn {
             }
 
             // Get receive items
-            $itemsSql = "SELECT sri.*, p.product_name, p.product_sku
-                         FROM stock_receive_items sri
-                         JOIN products p ON sri.product_id = p.product_id
-                         WHERE sri.receive_id = :receiveId";
+            $itemsSql = "SELECT 
+                            sri.receive_item_id,
+                            sri.product_id,
+                            sri.quantity,
+                            sri.unit_price,
+                            (sri.quantity * sri.unit_price) as total_price,
+                            sri.batch_number,
+                            
+                            -- Product information
+                            p.product_name,
+                            p.barcode,
+                            p.description as product_description
+                            
+                        FROM stock_receive_items sri
+                        INNER JOIN products p ON sri.product_id = p.product_id
+                        WHERE sri.receive_id = :receiveId
+                        ORDER BY sri.created_at ASC";
+            
             $itemsStmt = $conn->prepare($itemsSql);
-            $itemsStmt->bindValue(":receiveId", $json['receive_id']);
+            $itemsStmt->bindValue(":receiveId", $data['receive_id']);
             $itemsStmt->execute();
-            $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-
-            $receive['items'] = $items;
+            $receive['items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
 
             echo json_encode([
                 'status' => 'success',
                 'message' => 'Stock receive retrieved successfully',
                 'data' => $receive
             ]);
+            
         } catch (PDOException $e) {
             echo json_encode([
                 'status' => 'error',
@@ -438,9 +641,9 @@ class StockIn {
         include "connection-pdo.php";
         
         try {
-            $json = json_decode($json, true);
+            $data = json_decode($json, true);
             
-            if(empty($json['supplier_id'])) {
+            if(empty($data['supplier_id'])) {
                 echo json_encode([
                     'status' => 'error',
                     'message' => 'Missing required field: supplier_id'
@@ -448,15 +651,31 @@ class StockIn {
                 return;
             }
 
-            $sql = "SELECT sr.*, s.supplier_name, w.warehouse_name, u.full_name as received_by_name
+            $sql = "SELECT 
+                        sr.receive_id,
+                        sr.receipt_code,
+                        sr.supplier_invoice,
+                        sr.receive_date,
+                        sr.total_amount,
+                        
+                        -- Supplier information
+                        s.supplier_name,
+                        
+                        -- Warehouse information
+                        w.warehouse_name,
+                        
+                        -- Received by user information
+                        u.full_name as received_by_name
+                        
                     FROM stock_receive sr
-                    JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-                    JOIN users u ON sr.received_by = u.user_id
+                    INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
+                    INNER JOIN users u ON sr.received_by = u.user_id
                     WHERE sr.supplier_id = :supplierId
                     ORDER BY sr.receive_date DESC";
+
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":supplierId", $json['supplier_id']);
+            $stmt->bindValue(":supplierId", $data['supplier_id']);
             $stmt->execute();
             $receives = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -465,6 +684,7 @@ class StockIn {
                 'message' => 'Stock receives retrieved successfully',
                 'data' => $receives
             ]);
+            
         } catch (PDOException $e) {
             echo json_encode([
                 'status' => 'error',
@@ -478,9 +698,9 @@ class StockIn {
         include "connection-pdo.php";
         
         try {
-            $json = json_decode($json, true);
+            $data = json_decode($json, true);
             
-            if(empty($json['warehouse_id'])) {
+            if(empty($data['warehouse_id'])) {
                 echo json_encode([
                     'status' => 'error',
                     'message' => 'Missing required field: warehouse_id'
@@ -488,15 +708,31 @@ class StockIn {
                 return;
             }
 
-            $sql = "SELECT sr.*, s.supplier_name, w.warehouse_name, u.full_name as received_by_name
+            $sql = "SELECT 
+                        sr.receive_id,
+                        sr.receipt_code,
+                        sr.supplier_invoice,
+                        sr.receive_date,
+                        sr.total_amount,
+                        
+                        -- Supplier information
+                        s.supplier_name,
+                        
+                        -- Warehouse information
+                        w.warehouse_name,
+                        
+                        -- Received by user information
+                        u.full_name as received_by_name
+                        
                     FROM stock_receive sr
-                    JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-                    JOIN users u ON sr.received_by = u.user_id
+                    INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
+                    INNER JOIN users u ON sr.received_by = u.user_id
                     WHERE sr.warehouse_id = :warehouseId
                     ORDER BY sr.receive_date DESC";
+
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":warehouseId", $json['warehouse_id']);
+            $stmt->bindValue(":warehouseId", $data['warehouse_id']);
             $stmt->execute();
             $receives = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -505,6 +741,7 @@ class StockIn {
                 'message' => 'Stock receives retrieved successfully',
                 'data' => $receives
             ]);
+            
         } catch (PDOException $e) {
             echo json_encode([
                 'status' => 'error',
@@ -518,9 +755,9 @@ class StockIn {
         include "connection-pdo.php";
         
         try {
-            $json = json_decode($json, true);
+            $data = json_decode($json, true);
             
-            if(empty($json['start_date']) || empty($json['end_date'])) {
+            if(empty($data['start_date']) || empty($data['end_date'])) {
                 echo json_encode([
                     'status' => 'error',
                     'message' => 'Missing required fields: start_date and end_date'
@@ -528,16 +765,32 @@ class StockIn {
                 return;
             }
 
-            $sql = "SELECT sr.*, s.supplier_name, w.warehouse_name, u.full_name as received_by_name
+            $sql = "SELECT 
+                        sr.receive_id,
+                        sr.receipt_code,
+                        sr.supplier_invoice,
+                        sr.receive_date,
+                        sr.total_amount,
+                        
+                        -- Supplier information
+                        s.supplier_name,
+                        
+                        -- Warehouse information
+                        w.warehouse_name,
+                        
+                        -- Received by user information
+                        u.full_name as received_by_name
+                        
                     FROM stock_receive sr
-                    JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-                    JOIN users u ON sr.received_by = u.user_id
+                    INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
+                    INNER JOIN users u ON sr.received_by = u.user_id
                     WHERE sr.receive_date BETWEEN :startDate AND :endDate
                     ORDER BY sr.receive_date DESC";
+
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":startDate", $json['start_date']);
-            $stmt->bindValue(":endDate", $json['end_date']);
+            $stmt->bindValue(":startDate", $data['start_date']);
+            $stmt->bindValue(":endDate", $data['end_date']);
             $stmt->execute();
             $receives = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -546,6 +799,7 @@ class StockIn {
                 'message' => 'Stock receives retrieved successfully',
                 'data' => $receives
             ]);
+            
         } catch (PDOException $e) {
             echo json_encode([
                 'status' => 'error',
@@ -554,202 +808,204 @@ class StockIn {
         }
     }
 
-    // function getManagerStockReceives($json) {
-    //     include "connection-pdo.php";
+    // Get orders with their receive status
+    function getOrdersWithReceiveStatus() {
+        include "connection-pdo.php";
 
-    //     try {
-    //         $data = json_decode($json, true);
-            
-    //         if(empty($data['user_id'])) {
-    //             throw new Exception("User ID is required");
-    //         }
+        try {
+            $sql = "SELECT 
+                        po.order_id,
+                        po.order_date,
+                        po.total_amount as order_total_amount,
+                        
+                        -- Supplier information
+                        s.supplier_name,
+                        
+                        -- Created by user information
+                        u.full_name as created_by_name,
+                        
+                        -- Stock receive information (if exists)
+                        sr.receive_id,
+                        sr.receipt_code,
+                        sr.receive_date,
+                        sr.total_amount as receive_total_amount,
+                        
+                        -- Warehouse information (from stock receive)
+                        w.warehouse_name,
+                        
+                        -- Received by user information
+                        ru.full_name as received_by_name
+                        
+                    FROM product_orders po
+                    INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
+                    INNER JOIN users u ON po.created_by = u.user_id
+                    LEFT JOIN stock_receive sr ON po.order_id = sr.order_id
+                    LEFT JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
+                    LEFT JOIN users ru ON sr.received_by = ru.user_id
+                    ORDER BY po.order_date DESC";
 
-    //         $userId = $data['user_id'];
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    //         // First verify the user is a warehouse manager and get their assigned warehouses
-    //         $warehousesSql = "SELECT w.warehouse_id, w.warehouse_name
-    //                         FROM warehouses w
-    //                         JOIN assign_warehouse aw ON w.warehouse_id = aw.warehouse_id
-    //                         WHERE aw.user_id = :userId AND aw.is_active = 1";
-            
-    //         $stmt = $conn->prepare($warehousesSql);
-    //         $stmt->bindValue(":userId", $userId);
-    //         $stmt->execute();
-    //         $warehouses = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-    //         if(empty($warehouses)) {
-    //             throw new Exception("User is not assigned to any warehouses or is not a manager");
-    //         }
-
-    //         $warehouseIds = array_column($warehouses, 'warehouse_id');
-    //         $placeholders = implode(',', array_fill(0, count($warehouseIds), '?'));
-
-    //         // Get all stock receives for the manager's warehouses
-    //         $sql = "SELECT sr.*, s.supplier_name, w.warehouse_name, u.full_name as received_by_name,
-    //                     po.order_date, po.total_amount as order_total_amount
-    //                 FROM stock_receive sr
-    //                 JOIN suppliers s ON sr.supplier_id = s.supplier_id
-    //                 JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-    //                 JOIN users u ON sr.received_by = u.user_id
-    //                 LEFT JOIN product_orders po ON sr.order_id = po.order_id
-    //                 WHERE sr.warehouse_id IN ($placeholders)
-    //                 ORDER BY sr.receive_date DESC";
-            
-    //         $stmt = $conn->prepare($sql);
-    //         foreach ($warehouseIds as $k => $id) {
-    //             $stmt->bindValue(($k+1), $id);
-    //         }
-    //         $stmt->execute();
-    //         $receives = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    //         // Now get items for each receive
-    //         foreach ($receives as &$receive) {
-    //             // Get order items if this receive is linked to an order
-    //             if ($receive['order_id']) {
-    //                 $itemsSql = "SELECT 
-    //                                 poi.order_item_id, poi.product_id, poi.quantity, 
-    //                                 poi.unit_price, poi.total_price,
-    //                                 p.product_name, p.product_sku, p.barcode
-    //                             FROM product_order_items poi
-    //                             JOIN products p ON poi.product_id = p.product_id
-    //                             WHERE poi.order_id = :orderId";
-                    
-    //                 $itemsStmt = $conn->prepare($itemsSql);
-    //                 $itemsStmt->bindValue(":orderId", $receive['order_id']);
-    //                 $itemsStmt->execute();
-    //                 $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-                    
-    //                 $receive['order_items'] = $items;
-    //             } else {
-    //                 $receive['order_items'] = [];
-    //             }
-                
-    //             // Get stock receive items
-    //             $receiveItemsSql = "SELECT 
-    //                                 sri.receive_item_id, sri.product_id, sri.quantity, 
-    //                                 sri.unit_price, (sri.quantity * sri.unit_price) as total_price,
-    //                                 p.product_name, p.product_sku, p.barcode
-    //                                 FROM stock_receive_items sri
-    //                                 JOIN products p ON sri.product_id = p.product_id
-    //                                 WHERE sri.receive_id = :receiveId";
-                
-    //             $receiveItemsStmt = $conn->prepare($receiveItemsSql);
-    //             $receiveItemsStmt->bindValue(":receiveId", $receive['receive_id']);
-    //             $receiveItemsStmt->execute();
-    //             $receiveItems = $receiveItemsStmt->fetchAll(PDO::FETCH_ASSOC);
-                
-    //             $receive['receive_items'] = $receiveItems;
-    //         }
-
-    //         echo json_encode([
-    //             'status' => 'success',
-    //             'message' => 'Stock receives retrieved successfully for manager',
-    //             'data' => [
-    //                 'manager_id' => $userId,
-    //                 'assigned_warehouses' => $warehouses,
-    //                 'receives' => $receives
-    //             ]
-    //         ]);
-    //     } catch (PDOException $e) {
-    //         echo json_encode([
-    //             'status' => 'error',
-    //             'message' => 'Database error: ' . $e->getMessage()
-    //         ]);
-    //     } catch (Exception $e) {
-    //         echo json_encode([
-    //             'status' => 'error',
-    //             'message' => $e->getMessage()
-    //         ]);
-    //     }
-    // }
-
-    function getManagerStockReceives($json) {
-    include "connection-pdo.php";
-
-    try {
-        $data = json_decode($json, true);
-        
-        if(empty($data['user_id'])) {
-            throw new Exception("User ID is required");
-        }
-
-        $userId = $data['user_id'];
-
-        // Get all product orders created by this user
-        $sql = "SELECT 
-                    po.order_id, po.order_date, po.total_amount, po.notes,
-                    s.supplier_id, s.supplier_name,
-                    sr.receive_id, sr.receipt_code, sr.receive_date,
-                    w.warehouse_id, w.warehouse_name,
-                    u.full_name as created_by_name
-                FROM product_orders po
-                JOIN suppliers s ON po.supplier_id = s.supplier_id
-                LEFT JOIN stock_receive sr ON po.order_id = sr.order_id
-                LEFT JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-                JOIN users u ON po.created_by = u.user_id
-                WHERE po.created_by = :userId
-                ORDER BY po.order_date DESC";
-        
-        $stmt = $conn->prepare($sql);
-        $stmt->bindValue(":userId", $userId);
-        $stmt->execute();
-        $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Now get items for each order/receive
-        foreach ($orders as &$order) {
-            // Get order items
-            $itemsSql = "SELECT 
-                            poi.order_item_id, poi.product_id, poi.quantity, 
-                            poi.unit_price, poi.total_price,
-                            p.product_name, p.product_sku, p.barcode
-                        FROM product_order_items poi
-                        JOIN products p ON poi.product_id = p.product_id
-                        WHERE poi.order_id = :orderId";
-            
-            $itemsStmt = $conn->prepare($itemsSql);
-            $itemsStmt->bindValue(":orderId", $order['order_id']);
-            $itemsStmt->execute();
-            $order['order_items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // Get receive items if this order has a receive record
-            if ($order['receive_id']) {
-                $receiveItemsSql = "SELECT 
-                                    sri.receive_item_id, sri.product_id, sri.quantity, 
-                                    sri.unit_price, (sri.quantity * sri.unit_price) as total_price,
-                                    p.product_name, p.product_sku, p.barcode
-                                    FROM stock_receive_items sri
-                                    JOIN products p ON sri.product_id = p.product_id
-                                    WHERE sri.receive_id = :receiveId";
-                
-                $receiveItemsStmt = $conn->prepare($receiveItemsSql);
-                $receiveItemsStmt->bindValue(":receiveId", $order['receive_id']);
-                $receiveItemsStmt->execute();
-                $order['receive_items'] = $receiveItemsStmt->fetchAll(PDO::FETCH_ASSOC);
-            } else {
-                $order['receive_items'] = [];
+            // Add status flags
+            foreach ($orders as &$order) {
+                $order['is_received'] = !empty($order['receive_id']);
+                $order['receive_status'] = $order['is_received'] ? 'RECEIVED' : 'PENDING';
             }
-        }
 
-        echo json_encode([
-            'status' => 'success',
-            'message' => 'Product orders and stock receives retrieved successfully for manager',
-            'data' => [
-                'manager_id' => $userId,
-                'orders' => $orders
-            ]
-        ]);
-    } catch (PDOException $e) {
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'Database error: ' . $e->getMessage()
-        ]);
-    } catch (Exception $e) {
-        echo json_encode([
-            'status' => 'error',
-            'message' => $e->getMessage()
-        ]);
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Orders with receive status retrieved successfully',
+                'data' => $orders
+            ]);
+            
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
     }
-}
+
+    // Get stock receives by user (who received the stock)
+    function getStockReceivesByUser($json) {
+        include "connection-pdo.php";
+        
+        try {
+            $data = json_decode($json, true);
+            
+            if(empty($data['user_id'])) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Missing required field: user_id'
+                ]);
+                return;
+            }
+
+            $sql = "SELECT 
+                        sr.receive_id,
+                        sr.receipt_code,
+                        sr.supplier_invoice,
+                        sr.order_id,
+                        sr.receive_date,
+                        sr.total_amount,
+                        sr.created_at,
+                        sr.updated_at,
+                        
+                        -- Supplier information
+                        s.supplier_id,
+                        s.supplier_name,
+                        s.contact_person,
+                        s.phone as supplier_phone,
+                        s.email as supplier_email,
+                        s.address as supplier_address,
+                        
+                        -- Warehouse information
+                        w.warehouse_id,
+                        w.warehouse_name,
+                        
+                        -- Received by user information
+                        u.user_id as received_by_id,
+                        u.full_name as received_by_name,
+                        u.email as received_by_email,
+                        u.phone as received_by_phone,
+                        
+                        -- Order information (if linked)
+                        po.order_date,
+                        po.total_amount as order_total_amount,
+                        
+                        -- Order creator information
+                        cu.user_id as order_created_by_id,
+                        cu.full_name as order_created_by_name
+                        
+                    FROM stock_receive sr
+                    INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
+                    INNER JOIN users u ON sr.received_by = u.user_id
+                    LEFT JOIN product_orders po ON sr.order_id = po.order_id
+                    LEFT JOIN users cu ON po.created_by = cu.user_id
+                    WHERE sr.received_by = :userId
+                    ORDER BY sr.receive_date DESC, sr.created_at DESC";
+
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":userId", $data['user_id']);
+            $stmt->execute();
+            $receives = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Get receive items for each receive (optional - only if detailed view is needed)
+            $includeItems = $data['include_items'] ?? false;
+            
+            if ($includeItems) {
+                foreach ($receives as &$receive) {
+                    $receiveItemsSql = "SELECT 
+                                        sri.receive_item_id,
+                                        sri.product_id,
+                                        sri.quantity,
+                                        sri.unit_price,
+                                        (sri.quantity * sri.unit_price) as total_price,
+                                        sri.batch_number,
+                                        sri.created_at as receive_item_created_at,
+                                        
+                                        -- Product information
+                                        p.product_name,
+                                        p.barcode,
+                                        p.description as product_description,
+                                        p.selling_price,
+                                        
+                                        -- Category information (if exists)
+                                        c.category_id,
+                                        c.category_name
+                                        
+                                        FROM stock_receive_items sri
+                                        INNER JOIN products p ON sri.product_id = p.product_id
+                                        LEFT JOIN categories c ON p.category_id = c.category_id
+                                        WHERE sri.receive_id = :receiveId
+                                        ORDER BY sri.created_at ASC";
+                    
+                    $receiveItemsStmt = $conn->prepare($receiveItemsSql);
+                    $receiveItemsStmt->bindValue(":receiveId", $receive['receive_id']);
+                    $receiveItemsStmt->execute();
+                    $receive['items'] = $receiveItemsStmt->fetchAll(PDO::FETCH_ASSOC);
+                }
+            }
+
+            // Calculate summary statistics
+            $totalReceives = count($receives);
+            $totalAmount = array_sum(array_column($receives, 'total_amount'));
+            $uniqueSuppliers = count(array_unique(array_column($receives, 'supplier_id')));
+            $uniqueWarehouses = count(array_unique(array_column($receives, 'warehouse_id')));
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Stock receives retrieved successfully for user',
+                'data' => [
+                    'user_id' => $data['user_id'],
+                    'user_name' => !empty($receives) ? $receives[0]['received_by_name'] : null,
+                    'summary' => [
+                        'total_receives' => $totalReceives,
+                        'total_amount' => $totalAmount,
+                        'unique_suppliers' => $uniqueSuppliers,
+                        'unique_warehouses' => $uniqueWarehouses
+                    ],
+                    'receives' => $receives
+                ]
+            ]);
+            
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        } catch (Exception $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+
 }
 
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
@@ -777,14 +1033,20 @@ if ($operation === "createOrderAndReceiveStock") {
 } else {
     // Handle other operations
     switch($operation) {
+        case "getAllProductOrders":
+            echo $stockIn->getAllProductOrders();
+            break;
         case "getAllStockReceives":
             echo $stockIn->getAllStockReceives();
             break;
-        case "getAllOrdersWithReceives":
-            echo $stockIn->getAllOrdersWithReceives();
+        case "getProductOrder":
+            echo $stockIn->getProductOrder($json);
             break;
         case "getStockReceive":
             echo $stockIn->getStockReceive($json);
+            break;
+        case "getOrdersBySupplier":
+            echo $stockIn->getOrdersBySupplier($json);
             break;
         case "getStockReceivesBySupplier":
             echo $stockIn->getStockReceivesBySupplier($json);
@@ -795,8 +1057,8 @@ if ($operation === "createOrderAndReceiveStock") {
         case "getStockReceivesByDateRange":
             echo $stockIn->getStockReceivesByDateRange($json);
             break;
-        case "getManagerStockReceives":
-            echo $stockIn->getManagerStockReceives($json);
+        case "getStockReceivesByUser":
+            echo $stockIn->getStockReceivesByUser($json);
             break;
         default:
             echo json_encode([
