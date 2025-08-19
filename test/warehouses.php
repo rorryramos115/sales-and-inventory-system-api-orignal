@@ -716,6 +716,40 @@ class Warehouse {
             ]);
         }
     }
+
+    // Get all warehouses that have an active warehouse manager assigned
+    function getWarehousesWithManagers() {
+        include "connection-pdo.php";
+
+        try {
+            $sql = "SELECT w.*, 
+                    u.user_id as manager_id, 
+                    u.full_name as manager_name,
+                    u.email as manager_email,
+                    u.phone as manager_phone
+                    FROM warehouses w
+                    JOIN assign_warehouse aw ON w.warehouse_id = aw.warehouse_id AND aw.is_active = 1
+                    JOIN users u ON aw.user_id = u.user_id
+                    JOIN roles r ON u.role_id = r.role_id
+                    WHERE r.role_name = 'warehouse_manager'
+                    ORDER BY w.warehouse_name";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $warehouses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Warehouses with managers retrieved successfully',
+                'data' => $warehouses
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
 }
 
 // Handle the request
@@ -775,6 +809,9 @@ if ($operation === "createWarehouse") {
             break;
         case "getManagerWarehouseStock":
             $warehouse->getManagerWarehouseStock($json);
+            break;
+        case "getWarehousesWithManagers":
+            $warehouse->getWarehousesWithManagers();
             break;
         default:
             echo json_encode([

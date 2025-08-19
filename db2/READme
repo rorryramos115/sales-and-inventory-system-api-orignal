@@ -1,7 +1,12 @@
--- Create database
+-- ===============================================
+-- DATABASE
+-- ===============================================
 CREATE DATABASE grocery_sales_inventory;
 USE grocery_sales_inventory;
 
+-- ===============================================
+-- USERS & ROLES
+-- ===============================================
 CREATE TABLE roles (
     role_id CHAR(36) PRIMARY KEY,
     role_name VARCHAR(50) NOT NULL UNIQUE,
@@ -17,23 +22,64 @@ CREATE TABLE users (
     phone VARCHAR(20),
     role_id CHAR(36) NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
-    must_change_password BOOLEAN DEFAULT TRUE, 
+    must_change_password BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (role_id) REFERENCES roles(role_id)
 );
 
--- Counter table
-CREATE TABLE counters (
-    counter_id CHAR(36) PRIMARY KEY,
-    counter_name VARCHAR(50) NOT NULL,
+-- User logins
+-- CREATE TABLE user_logins (
+--     login_id CHAR(36) PRIMARY KEY,
+--     user_id CHAR(36) NOT NULL,
+--     login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+--     ip_address VARCHAR(45),
+--     user_agent TEXT,
+--     success BOOLEAN DEFAULT TRUE,
+--     FOREIGN KEY (user_id) REFERENCES users(user_id)
+-- );
+
+CREATE TABLE user_assignments (
+    assignment_id CHAR(36) PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    location_id CHAR(36) NOT NULL, 
+    assigned_date DATE NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (location_id) REFERENCES locations(location_id),
+    UNIQUE KEY (user_id, location_id, assigned_date)
+);
+
+
+-- ===============================================
+-- LOCATIONS (Warehouses, Stores, etc.)
+-- ===============================================
+CREATE TABLE locations (
+    location_id CHAR(36) PRIMARY KEY,
+    location_type ENUM('warehouse','store') NOT NULL,
+    location_name VARCHAR(100) NOT NULL,
+    address VARCHAR(255),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- ===============================================
+-- COUNTERS (Store POS terminals)
+-- ===============================================
+CREATE TABLE counters (
+    counter_id CHAR(36) PRIMARY KEY,
+    counter_name VARCHAR(50) NOT NULL,
+    store_id CHAR(36) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (store_id) REFERENCES locations(location_id)
+);
 
--- Category table
+-- ===============================================
+-- PRODUCTS & CATEGORIES
+-- ===============================================
 CREATE TABLE categories (
     category_id CHAR(36) PRIMARY KEY,
     category_name VARCHAR(50) UNIQUE NOT NULL,
@@ -56,41 +102,20 @@ CREATE TABLE products (
     FOREIGN KEY (category_id) REFERENCES categories(category_id)
 );
 
--- Warehouse table
-CREATE TABLE warehouses (
-    warehouse_id CHAR(36) PRIMARY KEY,
-    warehouse_name VARCHAR(50) NOT NULL,
-    location VARCHAR(100),
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+-- Price history
+CREATE TABLE product_price_history (
+    price_id CHAR(36) PRIMARY KEY,
+    product_id CHAR(36) NOT NULL,
+    new_price DECIMAL(10,2) NOT NULL,
+    changed_by CHAR(36) NOT NULL,
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(product_id),
+    FOREIGN KEY (changed_by) REFERENCES users(user_id)
 );
 
-
--- Stores
-CREATE TABLE stores (
-    store_id CHAR(36) PRIMARY KEY,
-    store_name VARCHAR(100) NOT NULL,
-    location VARCHAR(255),
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- Assign warehouse (users to warehouses)
-CREATE TABLE assign (
-    assign_id CHAR(36) PRIMARY KEY,
-    assign_type ENUM('warehouse','store') NOT NULL,
-    user_id CHAR(36) NOT NULL,
-    warehouse_id CHAR(36) NOT NULL,
-    assigned_date DATE NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
-    UNIQUE KEY (user_id, warehouse_id, assigned_date)
-);
-
--- Supplier table
+-- ===============================================
+-- SUPPLIERS
+-- ===============================================
 CREATE TABLE suppliers (
     supplier_id CHAR(36) PRIMARY KEY,
     supplier_name VARCHAR(100) NOT NULL UNIQUE,
@@ -103,7 +128,6 @@ CREATE TABLE suppliers (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Supplier products (products supplied by each supplier)
 CREATE TABLE supplier_products (
     supplier_product_id CHAR(36) PRIMARY KEY,
     supplier_id CHAR(36) NOT NULL,
@@ -116,40 +140,25 @@ CREATE TABLE supplier_products (
     UNIQUE KEY (supplier_id, product_id)
 );
 
--- =====================
+-- ===============================================
 -- STOCK STORAGE
--- =====================
-
--- Warehouse stock
-CREATE TABLE warehouse_stock (
+-- ===============================================
+CREATE TABLE stock (
     stock_id CHAR(36) PRIMARY KEY,
-    warehouse_id CHAR(36) NOT NULL,
+    location_id CHAR(36) NOT NULL,
     product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL DEFAULT 0,
     unit_cost DECIMAL(10,2),
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (location_id) REFERENCES locations(location_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id),
-    UNIQUE KEY (warehouse_id, product_id)
+    UNIQUE KEY (location_id, product_id)
 );
 
--- Store Stock
-CREATE TABLE store_stock (
-    store_stock_id CHAR(36) PRIMARY KEY,
-    store_id CHAR(36) NOT NULL,
-    product_id CHAR(36) NOT NULL,
-    quantity INT NOT NULL DEFAULT 0,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (store_id) REFERENCES stores(store_id),
-    FOREIGN KEY (product_id) REFERENCES products(product_id),
-    UNIQUE KEY (store_id, product_id)
-);
-
--- =====================
--- STOCK TRANSFER (Warehouse → Store, etc.)
--- =====================
-
+-- ===============================================
+-- STOCK TRANSFERS
+-- ===============================================
 CREATE TABLE stock_transfers (
     transfer_id CHAR(36) PRIMARY KEY,
     from_location_id CHAR(36) NOT NULL,
@@ -158,6 +167,8 @@ CREATE TABLE stock_transfers (
     created_by CHAR(36) NOT NULL,
     transfer_date DATE NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (from_location_id) REFERENCES locations(location_id),
+    FOREIGN KEY (to_location_id) REFERENCES locations(location_id),
     FOREIGN KEY (created_by) REFERENCES users(user_id)
 );
 
@@ -171,16 +182,14 @@ CREATE TABLE stock_transfer_items (
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
 
-
-
--- Product order (purchase orders to suppliers)
--- Product orders
--- possible rename to purchase_orders
-CREATE TABLE purchase_order (
+-- ===============================================
+-- PURCHASE ORDERS & RECEIVING
+-- ===============================================
+CREATE TABLE purchase_orders (
     order_id CHAR(36) PRIMARY KEY,
     supplier_id CHAR(36) NOT NULL,
     order_date DATE NOT NULL,
-    total_amount DECIMAL(12,2),  
+    total_amount DECIMAL(12,2),
     created_by CHAR(36) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -188,8 +197,6 @@ CREATE TABLE purchase_order (
     FOREIGN KEY (created_by) REFERENCES users(user_id)
 );
 
--- Product order items
--- posible rename to purchase_order_items
 CREATE TABLE purchase_order_items (
     order_item_id CHAR(36) PRIMARY KEY,
     order_id CHAR(36) NOT NULL,
@@ -197,57 +204,52 @@ CREATE TABLE purchase_order_items (
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     total_price DECIMAL(10,2) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (order_id) REFERENCES product_orders(order_id),
+    FOREIGN KEY (order_id) REFERENCES purchase_orders(order_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
 
--- Stock receive (supplier deliveries)
 CREATE TABLE stock_receive (
     receive_id CHAR(36) PRIMARY KEY,
-    receipt_code VARCHAR(50) UNIQUE NOT NULL, 
-    supplier_invoice VARCHAR(100),          
-    order_id CHAR(36),                   
+    receipt_code VARCHAR(50) UNIQUE NOT NULL,
+    supplier_invoice VARCHAR(100),
+    order_id CHAR(36),
     receive_date DATE NOT NULL,
     supplier_id CHAR(36) NOT NULL,
-    warehouse_id CHAR(36) NOT NULL,
+    location_id CHAR(36) NOT NULL, -- where stock is received (warehouse/store)
     received_by CHAR(36) NOT NULL,
-    total_amount DECIMAL(12,2),          
+    total_amount DECIMAL(12,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (order_id) REFERENCES product_orders(order_id),
+    FOREIGN KEY (order_id) REFERENCES purchase_orders(order_id),
     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
-    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (location_id) REFERENCES locations(location_id),
     FOREIGN KEY (received_by) REFERENCES users(user_id)
 );
 
--- Stock receive items
 CREATE TABLE stock_receive_items (
     receive_item_id CHAR(36) PRIMARY KEY,
     receive_id CHAR(36) NOT NULL,
     product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
-    batch_number VARCHAR(50) NULL,       
+    batch_number VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, 
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (receive_id) REFERENCES stock_receive(receive_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
 
--- =====================
--- STOCK ADJUSTMENTS (Spoilage, Shrinkage, Manual, consumption Correction)
--- =====================
-
+-- ===============================================
+-- STOCK ADJUSTMENTS
+-- ===============================================
 CREATE TABLE stock_adjustments (
     adjustment_id CHAR(36) PRIMARY KEY,
-    location_type ENUM('warehouse','store') NOT NULL,
     location_id CHAR(36) NOT NULL,
     adjusted_by CHAR(36) NOT NULL,
     adjustment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     reason ENUM('spoilage','shrinkage','manual','consumption') NOT NULL,
     notes TEXT,
+    FOREIGN KEY (location_id) REFERENCES locations(location_id),
     FOREIGN KEY (adjusted_by) REFERENCES users(user_id)
 );
 
@@ -260,27 +262,23 @@ CREATE TABLE stock_adjustment_items (
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
 
-
--- =====================
--- PURCHASE ORDER RETURN (Warehouse → Supplier)
--- =====================
-
--- Supplier returns
+-- ===============================================
+-- SUPPLIER RETURNS
+-- ===============================================
 CREATE TABLE supplier_returns (
     return_id CHAR(36) PRIMARY KEY,
     supplier_id CHAR(36) NOT NULL,
     return_date DATE NOT NULL,
-    warehouse_id CHAR(36) NOT NULL,
+    location_id CHAR(36) NOT NULL,
     reason TEXT,
     returned_by CHAR(36) NOT NULL,
-    status ENUM('pending', 'approved', 'completed') DEFAULT 'pending',
+    status ENUM('pending','approved','completed') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
-    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (location_id) REFERENCES locations(location_id),
     FOREIGN KEY (returned_by) REFERENCES users(user_id)
 );
 
--- Supplier return items
 CREATE TABLE supplier_return_items (
     return_item_id CHAR(36) PRIMARY KEY,
     return_id CHAR(36) NOT NULL,
@@ -293,14 +291,13 @@ CREATE TABLE supplier_return_items (
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
 
--- =====================
+-- ===============================================
 -- SALES (Store → Customer)
--- =====================
-
--- Sales table
+-- ===============================================
 CREATE TABLE sales (
     sale_id CHAR(36) PRIMARY KEY,
     sale_code VARCHAR(20) NOT NULL UNIQUE,
+    store_id CHAR(36) NOT NULL,
     sale_date DATETIME NOT NULL,
     counter_id CHAR(36) NOT NULL,
     user_id CHAR(36) NOT NULL,
@@ -308,13 +305,13 @@ CREATE TABLE sales (
     subtotal DECIMAL(12,2) NOT NULL,
     tax_amount DECIMAL(10,2) DEFAULT 0,
     total_amount DECIMAL(12,2) NOT NULL,
-    payment_status ENUM('paid', 'pending') DEFAULT 'paid',
-    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    FOREIGN KEY (store_id) REFERENCES locations(location_id),
     FOREIGN KEY (counter_id) REFERENCES counters(counter_id),
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
--- Sales items
 CREATE TABLE sales_items (
     sale_item_id CHAR(36) PRIMARY KEY,
     sale_id CHAR(36) NOT NULL,
@@ -326,7 +323,6 @@ CREATE TABLE sales_items (
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
 
--- Receipts table
 CREATE TABLE receipts (
     receipt_id CHAR(36) PRIMARY KEY,
     receipt_number VARCHAR(20) NOT NULL UNIQUE,
@@ -338,19 +334,17 @@ CREATE TABLE receipts (
     FOREIGN KEY (created_by) REFERENCES users(user_id)
 );
 
--- =====================
--- SALES RETURN (Customer → Store)
--- =====================
-
--- Sales returns
+-- ===============================================
+-- SALES RETURNS
+-- ===============================================
 CREATE TABLE sales_returns (
     return_id CHAR(36) PRIMARY KEY,
     receipt_id CHAR(36),
     original_sale_id CHAR(36) NOT NULL,
-    return_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    return_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     counter_id CHAR(36) NOT NULL,
     user_id CHAR(36) NOT NULL,
-    warehouse_id CHAR(36) NOT NULL,
+    location_id CHAR(36) NOT NULL,
     total_items INT NOT NULL,
     total_amount DECIMAL(12,2) NOT NULL,
     reason TEXT,
@@ -358,10 +352,9 @@ CREATE TABLE sales_returns (
     FOREIGN KEY (original_sale_id) REFERENCES sales(sale_id),
     FOREIGN KEY (counter_id) REFERENCES counters(counter_id),
     FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id)
+    FOREIGN KEY (location_id) REFERENCES locations(location_id)
 );
 
--- Sales return items
 CREATE TABLE sales_return_items (
     return_item_id CHAR(36) PRIMARY KEY,
     return_id CHAR(36) NOT NULL,
@@ -370,32 +363,9 @@ CREATE TABLE sales_return_items (
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     total_price DECIMAL(10,2) NOT NULL,
-    condition ENUM('new', 'opened', 'damaged') NOT NULL DEFAULT 'new',
+    condition ENUM('new','opened','damaged') DEFAULT 'new',
     notes TEXT,
     FOREIGN KEY (return_id) REFERENCES sales_returns(return_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id),
     FOREIGN KEY (sale_item_id) REFERENCES sales_items(sale_item_id)
-);
-
--- Product price history
-CREATE TABLE product_price_history (
-    price_id CHAR(36) PRIMARY KEY,
-    product_id CHAR(36) NOT NULL, 
-    new_price DECIMAL(10,2),
-    changed_by CHAR(36) NOT NULL,
-    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(product_id),
-    FOREIGN KEY (changed_by) REFERENCES users(user_id)
-);
-
--- ===============================================
-
-CREATE TABLE user_logins (
-    login_id CHAR(36) PRIMARY KEY,
-    user_id CHAR(36) NOT NULL,
-    login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    ip_address VARCHAR(45),
-    user_agent TEXT, -- browser/device info
-    success BOOLEAN DEFAULT TRUE, -- for failed logins if you want
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
