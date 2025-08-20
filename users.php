@@ -108,7 +108,26 @@ class User {
                 throw new Exception("Failed to create user");
             }
 
-             $conn->commit(); 
+            // Handle location assignment if provided
+            if (!empty($data['location_id'])) {
+                $assignmentId = $this->generateUuid();
+                $assignmentSql = "INSERT INTO user_assignments(
+                                    assignment_id, user_id, location_id, assigned_date
+                                ) VALUES(
+                                    :assignmentId, :userId, :locationId, CURDATE()
+                                )";
+                
+                $assignmentStmt = $conn->prepare($assignmentSql);
+                $assignmentStmt->bindValue(":assignmentId", $assignmentId);
+                $assignmentStmt->bindValue(":userId", $userId);
+                $assignmentStmt->bindValue(":locationId", $data['location_id']);
+                
+                if (!$assignmentStmt->execute()) {
+                    throw new Exception("Failed to assign location to user");
+                }
+            }
+
+            $conn->commit(); 
             
             return json_encode([
                 'status' => 'success',
@@ -129,7 +148,7 @@ class User {
         }
     }
 
-    // Get a single user with role information
+    // Get a single user with role information and location assignment
     function getUser($json) {
         include "connection-pdo.php";
         
@@ -144,9 +163,12 @@ class User {
                 return;
             }
 
-            $sql = "SELECT u.*, r.role_name 
+            $sql = "SELECT u.*, r.role_name, 
+                    l.location_id, l.location_name, l.location_type
                     FROM users u 
                     LEFT JOIN roles r ON u.role_id = r.role_id 
+                    LEFT JOIN user_assignments ua ON u.user_id = ua.user_id AND ua.is_active = 1
+                    LEFT JOIN locations l ON ua.location_id = l.location_id
                     WHERE u.user_id = :userId";
             $stmt = $conn->prepare($sql);
             $stmt->bindValue(":userId", $json['user_id']);
@@ -178,6 +200,7 @@ class User {
     // Update user information
     function updateUser($data) {
         include "connection-pdo.php";
+        $conn->beginTransaction();
 
         try {
             if (empty($data['user_id'])) {
@@ -238,6 +261,38 @@ class User {
                 throw new Exception("Failed to update user");
             }
             
+            // Handle location assignment if provided
+            if (isset($data['location_id'])) {
+                // First, deactivate any existing assignments
+                $deactivateSql = "UPDATE user_assignments 
+                                 SET is_active = 0 
+                                 WHERE user_id = :userId";
+                $deactivateStmt = $conn->prepare($deactivateSql);
+                $deactivateStmt->bindValue(":userId", $data['user_id']);
+                $deactivateStmt->execute();
+                
+                // If a new location is provided, create a new assignment
+                if (!empty($data['location_id'])) {
+                    $assignmentId = $this->generateUuid();
+                    $assignmentSql = "INSERT INTO user_assignments(
+                                        assignment_id, user_id, location_id, assigned_date
+                                    ) VALUES(
+                                        :assignmentId, :userId, :locationId, CURDATE()
+                                    )";
+                    
+                    $assignmentStmt = $conn->prepare($assignmentSql);
+                    $assignmentStmt->bindValue(":assignmentId", $assignmentId);
+                    $assignmentStmt->bindValue(":userId", $data['user_id']);
+                    $assignmentStmt->bindValue(":locationId", $data['location_id']);
+                    
+                    if (!$assignmentStmt->execute()) {
+                        throw new Exception("Failed to assign location to user");
+                    }
+                }
+            }
+            
+            $conn->commit();
+            
             return json_encode([
                 'status' => 'success',
                 'message' => 'User updated successfully',
@@ -260,6 +315,7 @@ class User {
     // Delete a user
     function deleteUser($json) {
         include "connection-pdo.php";
+        $conn->beginTransaction();
         
         try {
             $json = json_decode($json, true);
@@ -272,12 +328,20 @@ class User {
                 return;
             }
 
+            // First delete user assignments
+            $deleteAssignmentsSql = "DELETE FROM user_assignments WHERE user_id = :userId";
+            $deleteAssignmentsStmt = $conn->prepare($deleteAssignmentsSql);
+            $deleteAssignmentsStmt->bindParam(":userId", $json['user_id']);
+            $deleteAssignmentsStmt->execute();
+
+            // Then delete the user
             $sql = "DELETE FROM users WHERE user_id = :userId";
             $stmt = $conn->prepare($sql);
             $stmt->bindParam(":userId", $json['user_id']);
             $stmt->execute();
 
             if($stmt->rowCount() > 0) {
+                $conn->commit();
                 echo json_encode([
                     'status' => 'success',
                     'message' => 'User deleted successfully',
@@ -286,12 +350,14 @@ class User {
                     ]
                 ]);
             } else {
+                $conn->rollBack();
                 echo json_encode([
                     'status' => 'error',
                     'message' => 'User not found'
                 ]);
             }
         } catch (PDOException $e) {
+            $conn->rollBack();
             echo json_encode([
                 'status' => 'error',
                 'message' => 'Database error: ' . $e->getMessage()
@@ -336,25 +402,25 @@ class User {
                 throw new Exception("Invalid email or password");
             }
 
+            // For warehouse managers and store staff - check location assignment
+            if ($user['role_name'] === 'warehouse_manager' || $user['role_name'] === 'store_staff') {
+                $locationSql = "SELECT l.location_id, l.location_name, l.location_type
+                                FROM user_assignments ua
+                                JOIN locations l ON ua.location_id = l.location_id
+                                WHERE ua.user_id = :userId AND ua.is_active = 1
+                                LIMIT 1";
+                $locationStmt = $conn->prepare($locationSql);
+                $locationStmt->bindValue(":userId", $user['user_id']);
+                $locationStmt->execute();
+                $location = $locationStmt->fetch(PDO::FETCH_ASSOC);
                 
-            // For warehouse managers - check warehouse assignment
-            if ($user['role_name'] === 'warehouse_manager') {
-                $warehouseSql = "SELECT w.warehouse_id, w.warehouse_name 
-                            FROM assign_warehouse aw
-                            JOIN warehouses w ON aw.warehouse_id = w.warehouse_id
-                            WHERE aw.user_id = :userId AND aw.is_active = 1
-                            LIMIT 1";
-                $warehouseStmt = $conn->prepare($warehouseSql);
-                $warehouseStmt->bindValue(":userId", $user['user_id']);
-                $warehouseStmt->execute();
-                $warehouse = $warehouseStmt->fetch(PDO::FETCH_ASSOC);
-                
-                if (!$warehouse) {
-                    throw new Exception("No warehouse assigned to this manager");
+                if (!$location) {
+                    throw new Exception("No location assigned to this user");
                 }
                 
-                $user['warehouse_id'] = $warehouse['warehouse_id'];
-                $user['warehouse_name'] = $warehouse['warehouse_name'];
+                $user['location_id'] = $location['location_id'];
+                $user['location_name'] = $location['location_name'];
+                $user['location_type'] = $location['location_type'];
             }
 
             // Check if user must change password
@@ -441,21 +507,22 @@ class User {
             $stmt->execute();
             $updatedUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // For warehouse managers - get warehouse assignment
-            if ($updatedUser['role_name'] === 'warehouse_manager') {
-                $warehouseSql = "SELECT w.warehouse_id, w.warehouse_name 
-                            FROM assign_warehouse aw
-                            JOIN warehouses w ON aw.warehouse_id = w.warehouse_id
-                            WHERE aw.user_id = :userId AND aw.is_active = 1
-                            LIMIT 1";
-                $warehouseStmt = $conn->prepare($warehouseSql);
-                $warehouseStmt->bindValue(":userId", $updatedUser['user_id']);
-                $warehouseStmt->execute();
-                $warehouse = $warehouseStmt->fetch(PDO::FETCH_ASSOC);
+            // For warehouse managers and store staff - get location assignment
+            if ($updatedUser['role_name'] === 'warehouse_manager' || $updatedUser['role_name'] === 'store_staff') {
+                $locationSql = "SELECT l.location_id, l.location_name, l.location_type
+                                FROM user_assignments ua
+                                JOIN locations l ON ua.location_id = l.location_id
+                                WHERE ua.user_id = :userId AND ua.is_active = 1
+                                LIMIT 1";
+                $locationStmt = $conn->prepare($locationSql);
+                $locationStmt->bindValue(":userId", $updatedUser['user_id']);
+                $locationStmt->execute();
+                $location = $locationStmt->fetch(PDO::FETCH_ASSOC);
                 
-                if ($warehouse) {
-                    $updatedUser['warehouse_id'] = $warehouse['warehouse_id'];
-                    $updatedUser['warehouse_name'] = $warehouse['warehouse_name'];
+                if ($location) {
+                    $updatedUser['location_id'] = $location['location_id'];
+                    $updatedUser['location_name'] = $location['location_name'];
+                    $updatedUser['location_type'] = $location['location_type'];
                 }
             }
 
@@ -588,63 +655,35 @@ class User {
         }
     }
 
-    // Count active and inactive users
-    // function countUserStatus() {
-    //     include "connection-pdo.php";
-
-    //     try {
-    //         $sql = "SELECT 
-    //                     SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_users,
-    //                     SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) as inactive_users,
-    //                     COUNT(*) as total_users
-    //                 FROM users";
-            
-    //         $stmt = $conn->prepare($sql);
-    //         $stmt->execute();
-    //         $counts = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    //         echo json_encode([
-    //             'status' => 'success',
-    //             'message' => 'User counts retrieved successfully',
-    //             'data' => $counts
-    //         ]);
-    //     } catch (PDOException $e) {
-    //         echo json_encode([
-    //             'status' => 'error',
-    //             'message' => 'Database error: ' . $e->getMessage()
-    //         ]);
-    //     }
-    // }
-
     // Count user status with role information
-function countUserStatus() {
-    include "connection-pdo.php";
+    function countUserStatus() {
+        include "connection-pdo.php";
 
-    try {
-        $sql = "SELECT 
-                    SUM(CASE WHEN u.is_active = 1 THEN 1 ELSE 0 END) as active_users,
-                    SUM(CASE WHEN u.is_active = 0 THEN 1 ELSE 0 END) as inactive_users,
-                    SUM(CASE WHEN r.role_name = 'admin' THEN 1 ELSE 0 END) as admin_users,
-                    COUNT(*) as total_users
-                FROM users u
-                LEFT JOIN roles r ON u.role_id = r.role_id";
-        
-        $stmt = $conn->prepare($sql);
-        $stmt->execute();
-        $counts = $stmt->fetch(PDO::FETCH_ASSOC);
+        try {
+            $sql = "SELECT 
+                        SUM(CASE WHEN u.is_active = 1 THEN 1 ELSE 0 END) as active_users,
+                        SUM(CASE WHEN u.is_active = 0 THEN 1 ELSE 0 END) as inactive_users,
+                        SUM(CASE WHEN r.role_name = 'admin' THEN 1 ELSE 0 END) as admin_users,
+                        COUNT(*) as total_users
+                    FROM users u
+                    LEFT JOIN roles r ON u.role_id = r.role_id";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $counts = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        echo json_encode([
-            'status' => 'success',
-            'message' => 'User counts retrieved successfully',
-            'data' => $counts
-        ]);
-    } catch (PDOException $e) {
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'Database error: ' . $e->getMessage()
-        ]);
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'User counts retrieved successfully',
+                'data' => $counts
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
     }
-}
 }
 
 $user = new User();
@@ -716,5 +755,4 @@ switch ($operation) {
             ]
         ]);
 }
-    
 ?>

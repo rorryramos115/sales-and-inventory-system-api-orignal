@@ -23,8 +23,8 @@ class StockIn {
             if (empty($data['supplier_id'])) {
                 throw new Exception("Supplier ID is required");
             }
-            if (empty($data['location_id'])) {
-                throw new Exception("Location ID is required");
+            if (empty($data['warehouse_id'])) {
+                throw new Exception("Warehouse ID is required");
             }
             if (empty($data['created_by'])) {
                 throw new Exception("Created by user ID is required");
@@ -54,7 +54,7 @@ class StockIn {
             }
 
             // Insert purchase order
-            $orderSql = "INSERT INTO purchase_orders(
+            $orderSql = "INSERT INTO product_orders(
                             order_id, supplier_id, order_date, total_amount, 
                             created_by
                         ) VALUES(
@@ -76,10 +76,10 @@ class StockIn {
             // Insert stock receive record (automatic)
             $receiveSql = "INSERT INTO stock_receive(
                             receive_id, receipt_code, supplier_invoice, order_id, 
-                            receive_date, supplier_id, location_id, received_by, total_amount
+                            receive_date, supplier_id, warehouse_id, received_by, total_amount
                         ) VALUES(
                             :receiveId, :receiptCode, :supplierInvoice, :orderId, 
-                            :receiveDate, :supplierId, :locationId, :receivedBy, :totalAmount
+                            :receiveDate, :supplierId, :warehouseId, :receivedBy, :totalAmount
                         )";
             
             $receiveStmt = $conn->prepare($receiveSql);
@@ -89,7 +89,7 @@ class StockIn {
             $receiveStmt->bindValue(":orderId", $orderId);
             $receiveStmt->bindValue(":receiveDate", $receiveDate);
             $receiveStmt->bindValue(":supplierId", $data['supplier_id']);
-            $receiveStmt->bindValue(":locationId", $data['location_id']);
+            $receiveStmt->bindValue(":warehouseId", $data['warehouse_id']);
             $receiveStmt->bindValue(":receivedBy", $data['created_by']);
             $receiveStmt->bindValue(":totalAmount", $totalAmount);
             
@@ -104,7 +104,7 @@ class StockIn {
                 $itemTotal = $item['quantity'] * $item['unit_price'];
                 
                 // Insert order item
-                $orderItemSql = "INSERT INTO purchase_order_items(
+                $orderItemSql = "INSERT INTO product_order_items(
                                     order_item_id, order_id, product_id, quantity, 
                                     unit_price, total_price
                                 ) VALUES(
@@ -127,10 +127,10 @@ class StockIn {
                 // Insert stock receive item
                 $receiveItemSql = "INSERT INTO stock_receive_items(
                                     receive_item_id, receive_id, product_id, quantity, 
-                                    unit_price, batch_number
+                                    unit_price
                                 ) VALUES(
                                     :receiveItemId, :receiveId, :productId, :quantity, 
-                                    :unitPrice, :batchNumber
+                                    :unitPrice
                                 )";
                 
                 $receiveItemStmt = $conn->prepare($receiveItemSql);
@@ -139,13 +139,12 @@ class StockIn {
                 $receiveItemStmt->bindValue(":productId", $item['product_id']);
                 $receiveItemStmt->bindValue(":quantity", $item['quantity'], PDO::PARAM_INT);
                 $receiveItemStmt->bindValue(":unitPrice", $item['unit_price']);
-                $receiveItemStmt->bindValue(":batchNumber", $item['batch_number'] ?? null);
                 
                 if (!$receiveItemStmt->execute()) {
                     throw new Exception("Failed to create receive item");
                 }
 
-                $this->updateLocationStock($conn, $data['location_id'], $item['product_id'], 
+                $this->updateWarehouseStock($conn, $data['warehouse_id'], $item['product_id'], 
                                         $item['quantity'], $item['unit_price']);
             }
             
@@ -161,7 +160,7 @@ class StockIn {
                     'order_date' => $orderDate,
                     'receive_date' => $receiveDate,
                     'supplier_id' => $data['supplier_id'],
-                    'location_id' => $data['location_id'],
+                    'warehouse_id' => $data['warehouse_id'],
                     'total_amount' => $totalAmount,
                     'supplier_invoice' => $supplierInvoice
                 ]
@@ -176,12 +175,12 @@ class StockIn {
         }
     }
 
-    private function updateLocationStock($conn, $locationId, $productId, $quantity, $unitCost) {
+    private function updateWarehouseStock($conn, $warehouseId, $productId, $quantity, $unitCost) {
         // Check if stock record exists
-        $checkSql = "SELECT stock_id, quantity FROM stock 
-                     WHERE location_id = :locationId AND product_id = :productId";
+        $checkSql = "SELECT stock_id, quantity FROM warehouse_stock 
+                     WHERE warehouse_id = :warehouseId AND product_id = :productId";
         $checkStmt = $conn->prepare($checkSql);
-        $checkStmt->bindValue(":locationId", $locationId);
+        $checkStmt->bindValue(":warehouseId", $warehouseId);
         $checkStmt->bindValue(":productId", $productId);
         $checkStmt->execute();
         $existingStock = $checkStmt->fetch(PDO::FETCH_ASSOC);
@@ -189,8 +188,8 @@ class StockIn {
         if ($existingStock) {
             // Update existing stock
             $newQuantity = $existingStock['quantity'] + $quantity;
-            $updateSql = "UPDATE stock 
-                         SET quantity = :quantity, unit_cost = :unitCost, last_updated = CURRENT_TIMESTAMP
+            $updateSql = "UPDATE warehouse_stock 
+                         SET quantity = :quantity, unit_cost = :unitCost 
                          WHERE stock_id = :stockId";
             $updateStmt = $conn->prepare($updateSql);
             $updateStmt->bindValue(":quantity", $newQuantity, PDO::PARAM_INT);
@@ -200,14 +199,14 @@ class StockIn {
         } else {
             // Create new stock record
             $stockId = $this->generateUuid();
-            $insertSql = "INSERT INTO stock(
-                             stock_id, location_id, product_id, quantity, unit_cost
+            $insertSql = "INSERT INTO warehouse_stock(
+                             stock_id, warehouse_id, product_id, quantity, unit_cost
                          ) VALUES(
-                             :stockId, :locationId, :productId, :quantity, :unitCost
+                             :stockId, :warehouseId, :productId, :quantity, :unitCost
                          )";
             $insertStmt = $conn->prepare($insertSql);
             $insertStmt->bindValue(":stockId", $stockId);
-            $insertStmt->bindValue(":locationId", $locationId);
+            $insertStmt->bindValue(":warehouseId", $warehouseId);
             $insertStmt->bindValue(":productId", $productId);
             $insertStmt->bindValue(":quantity", $quantity, PDO::PARAM_INT);
             $insertStmt->bindValue(":unitCost", $unitCost);
@@ -215,8 +214,8 @@ class StockIn {
         }
     }
 
-     // Get all purchase orders with complete details and items
-    function getAllPurchaseOrders() {
+     // Get all product orders with complete details and items
+    function getAllProductOrders() {
         include "connection-pdo.php";
 
         try {
@@ -241,7 +240,7 @@ class StockIn {
                         u.email as created_by_email,
                         u.phone as created_by_phone
                         
-                    FROM purchase_orders po
+                    FROM product_orders po
                     INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
                     INNER JOIN users u ON po.created_by = u.user_id
                     ORDER BY po.order_date DESC, po.created_at DESC";
@@ -258,6 +257,7 @@ class StockIn {
                                 poi.quantity,
                                 poi.unit_price,
                                 poi.total_price,
+                                poi.created_at as order_item_created_at,
                                 
                                 -- Product information
                                 p.product_name,
@@ -269,10 +269,11 @@ class StockIn {
                                 c.category_id,
                                 c.category_name
                                 
-                            FROM purchase_order_items poi
+                            FROM product_order_items poi
                             INNER JOIN products p ON poi.product_id = p.product_id
                             LEFT JOIN categories c ON p.category_id = c.category_id
-                            WHERE poi.order_id = :orderId";
+                            WHERE poi.order_id = :orderId
+                            ORDER BY poi.created_at ASC";
                 
                 $itemsStmt = $conn->prepare($itemsSql);
                 $itemsStmt->bindValue(":orderId", $order['order_id']);
@@ -282,7 +283,7 @@ class StockIn {
 
             echo json_encode([
                 'status' => 'success',
-                'message' => 'All purchase orders retrieved successfully',
+                'message' => 'All product orders retrieved successfully',
                 'data' => [
                     'total_orders' => count($orders),
                     'orders' => $orders
@@ -297,8 +298,8 @@ class StockIn {
         }
     }
 
-    // Get single purchase order with items
-    function getPurchaseOrder($json) {
+    // Get single product order with items
+    function getProductOrder($json) {
         include "connection-pdo.php";
         
         try {
@@ -332,7 +333,7 @@ class StockIn {
                         u.full_name as created_by_name,
                         u.email as created_by_email
                         
-                    FROM purchase_orders po
+                    FROM product_orders po
                     INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
                     INNER JOIN users u ON po.created_by = u.user_id
                     WHERE po.order_id = :orderId";
@@ -364,9 +365,10 @@ class StockIn {
                             p.description as product_description,
                             p.selling_price
                             
-                        FROM purchase_order_items poi
+                        FROM product_order_items poi
                         INNER JOIN products p ON poi.product_id = p.product_id
-                        WHERE poi.order_id = :orderId";
+                        WHERE poi.order_id = :orderId
+                        ORDER BY poi.created_at ASC";
             
             $itemsStmt = $conn->prepare($itemsSql);
             $itemsStmt->bindValue(":orderId", $data['order_id']);
@@ -375,7 +377,7 @@ class StockIn {
 
             echo json_encode([
                 'status' => 'success',
-                'message' => 'Purchase order retrieved successfully',
+                'message' => 'Product order retrieved successfully',
                 'data' => $order
             ]);
             
@@ -414,7 +416,7 @@ class StockIn {
                         -- Created by user information
                         u.full_name as created_by_name
                         
-                    FROM purchase_orders po
+                    FROM product_orders po
                     INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
                     INNER JOIN users u ON po.created_by = u.user_id
                     WHERE po.supplier_id = :supplierId
@@ -462,11 +464,9 @@ class StockIn {
                         s.email as supplier_email,
                         s.address as supplier_address,
                         
-                        -- Location information
-                        l.location_id,
-                        l.location_name,
-                        l.location_type,
-                        l.address as location_address,
+                        -- Warehouse information
+                        w.warehouse_id,
+                        w.warehouse_name,
                         
                         -- Received by user information
                         u.user_id as received_by_id,
@@ -479,9 +479,9 @@ class StockIn {
                         
                     FROM stock_receive sr
                     INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    INNER JOIN locations l ON sr.location_id = l.location_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
                     INNER JOIN users u ON sr.received_by = u.user_id
-                    LEFT JOIN purchase_orders po ON sr.order_id = po.order_id
+                    LEFT JOIN product_orders po ON sr.order_id = po.order_id
                     ORDER BY sr.receive_date DESC, sr.created_at DESC";
             
             $stmt = $conn->prepare($sql);
@@ -570,10 +570,9 @@ class StockIn {
                         s.phone as supplier_phone,
                         s.email as supplier_email,
                         
-                        -- Location information
-                        l.location_id,
-                        l.location_name,
-                        l.location_type,
+                        -- Warehouse information
+                        w.warehouse_id,
+                        w.warehouse_name,
                         
                         -- Received by user information
                         u.user_id as received_by_id,
@@ -582,7 +581,7 @@ class StockIn {
                         
                     FROM stock_receive sr
                     INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    INNER JOIN locations l ON sr.location_id = l.location_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
                     INNER JOIN users u ON sr.received_by = u.user_id
                     WHERE sr.receive_id = :receiveId";
 
@@ -662,16 +661,15 @@ class StockIn {
                         -- Supplier information
                         s.supplier_name,
                         
-                        -- Location information
-                        l.location_name,
-                        l.location_type,
+                        -- Warehouse information
+                        w.warehouse_name,
                         
                         -- Received by user information
                         u.full_name as received_by_name
                         
                     FROM stock_receive sr
                     INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    INNER JOIN locations l ON sr.location_id = l.location_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
                     INNER JOIN users u ON sr.received_by = u.user_id
                     WHERE sr.supplier_id = :supplierId
                     ORDER BY sr.receive_date DESC";
@@ -695,17 +693,17 @@ class StockIn {
         }
     }
 
-    // Get stock receives by location
-    function getStockReceivesByLocation($json) {
+    // Get stock receives by warehouse
+    function getStockReceivesByWarehouse($json) {
         include "connection-pdo.php";
         
         try {
             $data = json_decode($json, true);
             
-            if(empty($data['location_id'])) {
+            if(empty($data['warehouse_id'])) {
                 echo json_encode([
                     'status' => 'error',
-                    'message' => 'Missing required field: location_id'
+                    'message' => 'Missing required field: warehouse_id'
                 ]);
                 return;
             }
@@ -720,22 +718,21 @@ class StockIn {
                         -- Supplier information
                         s.supplier_name,
                         
-                        -- Location information
-                        l.location_name,
-                        l.location_type,
+                        -- Warehouse information
+                        w.warehouse_name,
                         
                         -- Received by user information
                         u.full_name as received_by_name
                         
                     FROM stock_receive sr
                     INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    INNER JOIN locations l ON sr.location_id = l.location_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
                     INNER JOIN users u ON sr.received_by = u.user_id
-                    WHERE sr.location_id = :locationId
+                    WHERE sr.warehouse_id = :warehouseId
                     ORDER BY sr.receive_date DESC";
 
             $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":locationId", $data['location_id']);
+            $stmt->bindValue(":warehouseId", $data['warehouse_id']);
             $stmt->execute();
             $receives = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -778,16 +775,15 @@ class StockIn {
                         -- Supplier information
                         s.supplier_name,
                         
-                        -- Location information
-                        l.location_name,
-                        l.location_type,
+                        -- Warehouse information
+                        w.warehouse_name,
                         
                         -- Received by user information
                         u.full_name as received_by_name
                         
                     FROM stock_receive sr
                     INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    INNER JOIN locations l ON sr.location_id = l.location_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
                     INNER JOIN users u ON sr.received_by = u.user_id
                     WHERE sr.receive_date BETWEEN :startDate AND :endDate
                     ORDER BY sr.receive_date DESC";
@@ -834,18 +830,17 @@ class StockIn {
                         sr.receive_date,
                         sr.total_amount as receive_total_amount,
                         
-                        -- Location information (from stock receive)
-                        l.location_name,
-                        l.location_type,
+                        -- Warehouse information (from stock receive)
+                        w.warehouse_name,
                         
                         -- Received by user information
                         ru.full_name as received_by_name
                         
-                    FROM purchase_orders po
+                    FROM product_orders po
                     INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
                     INNER JOIN users u ON po.created_by = u.user_id
                     LEFT JOIN stock_receive sr ON po.order_id = sr.order_id
-                    LEFT JOIN locations l ON sr.location_id = l.location_id
+                    LEFT JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
                     LEFT JOIN users ru ON sr.received_by = ru.user_id
                     ORDER BY po.order_date DESC";
 
@@ -906,11 +901,9 @@ class StockIn {
                         s.email as supplier_email,
                         s.address as supplier_address,
                         
-                        -- Location information
-                        l.location_id,
-                        l.location_name,
-                        l.location_type,
-                        l.address as location_address,
+                        -- Warehouse information
+                        w.warehouse_id,
+                        w.warehouse_name,
                         
                         -- Received by user information
                         u.user_id as received_by_id,
@@ -928,9 +921,9 @@ class StockIn {
                         
                     FROM stock_receive sr
                     INNER JOIN suppliers s ON sr.supplier_id = s.supplier_id
-                    INNER JOIN locations l ON sr.location_id = l.location_id
+                    INNER JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
                     INNER JOIN users u ON sr.received_by = u.user_id
-                    LEFT JOIN purchase_orders po ON sr.order_id = po.order_id
+                    LEFT JOIN product_orders po ON sr.order_id = po.order_id
                     LEFT JOIN users cu ON po.created_by = cu.user_id
                     WHERE sr.received_by = :userId
                     ORDER BY sr.receive_date DESC, sr.created_at DESC";
@@ -981,7 +974,7 @@ class StockIn {
             $totalReceives = count($receives);
             $totalAmount = array_sum(array_column($receives, 'total_amount'));
             $uniqueSuppliers = count(array_unique(array_column($receives, 'supplier_id')));
-            $uniqueLocations = count(array_unique(array_column($receives, 'location_id')));
+            $uniqueWarehouses = count(array_unique(array_column($receives, 'warehouse_id')));
 
             echo json_encode([
                 'status' => 'success',
@@ -993,7 +986,7 @@ class StockIn {
                         'total_receives' => $totalReceives,
                         'total_amount' => $totalAmount,
                         'unique_suppliers' => $uniqueSuppliers,
-                        'unique_locations' => $uniqueLocations
+                        'unique_warehouses' => $uniqueWarehouses
                     ],
                     'receives' => $receives
                 ]
@@ -1012,250 +1005,6 @@ class StockIn {
         }
     }
 
-    // Get stock levels by location
-    function getStockByLocation($json) {
-        include "connection-pdo.php";
-        
-        try {
-            $data = json_decode($json, true);
-            
-            if(empty($data['location_id'])) {
-                echo json_encode([
-                    'status' => 'error',
-                    'message' => 'Missing required field: location_id'
-                ]);
-                return;
-            }
-
-            $sql = "SELECT 
-                        s.stock_id,
-                        s.location_id,
-                        s.product_id,
-                        s.quantity,
-                        s.unit_cost,
-                        s.last_updated,
-                        s.created_at,
-                        
-                        -- Location information
-                        l.location_name,
-                        l.location_type,
-                        l.address as location_address,
-                        
-                        -- Product information
-                        p.product_name,
-                        p.barcode,
-                        p.description as product_description,
-                        p.selling_price,
-                        (s.quantity * s.unit_cost) as total_cost_value,
-                        (s.quantity * p.selling_price) as total_selling_value,
-                        
-                        -- Category information (if exists)
-                        c.category_id,
-                        c.category_name
-                        
-                    FROM stock s
-                    INNER JOIN locations l ON s.location_id = l.location_id
-                    INNER JOIN products p ON s.product_id = p.product_id
-                    LEFT JOIN categories c ON p.category_id = c.category_id
-                    WHERE s.location_id = :locationId AND s.quantity > 0
-                    ORDER BY p.product_name ASC";
-
-            $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":locationId", $data['location_id']);
-            $stmt->execute();
-            $stock = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // Calculate summary
-            $totalItems = count($stock);
-            $totalQuantity = array_sum(array_column($stock, 'quantity'));
-            $totalCostValue = array_sum(array_column($stock, 'total_cost_value'));
-            $totalSellingValue = array_sum(array_column($stock, 'total_selling_value'));
-
-            echo json_encode([
-                'status' => 'success',
-                'message' => 'Stock retrieved successfully for location',
-                'data' => [
-                    'location_id' => $data['location_id'],
-                    'location_name' => !empty($stock) ? $stock[0]['location_name'] : null,
-                    'location_type' => !empty($stock) ? $stock[0]['location_type'] : null,
-                    'summary' => [
-                        'total_items' => $totalItems,
-                        'total_quantity' => $totalQuantity,
-                        'total_cost_value' => $totalCostValue,
-                        'total_selling_value' => $totalSellingValue,
-                        'potential_profit' => $totalSellingValue - $totalCostValue
-                    ],
-                    'stock' => $stock
-                ]
-            ]);
-            
-        } catch (PDOException $e) {
-            echo json_encode([
-                'status' => 'error',
-                'message' => 'Database error: ' . $e->getMessage()
-            ]);
-        }
-    }
-
-    // Get all stock levels
-    function getAllStock() {
-        include "connection-pdo.php";
-
-        try {
-            $sql = "SELECT 
-                        s.stock_id,
-                        s.location_id,
-                        s.product_id,
-                        s.quantity,
-                        s.unit_cost,
-                        s.last_updated,
-                        s.created_at,
-                        
-                        -- Location information
-                        l.location_name,
-                        l.location_type,
-                        l.address as location_address,
-                        
-                        -- Product information
-                        p.product_name,
-                        p.barcode,
-                        p.description as product_description,
-                        p.selling_price,
-                        (s.quantity * s.unit_cost) as total_cost_value,
-                        (s.quantity * p.selling_price) as total_selling_value,
-                        
-                        -- Category information (if exists)
-                        c.category_id,
-                        c.category_name
-                        
-                    FROM stock s
-                    INNER JOIN locations l ON s.location_id = l.location_id
-                    INNER JOIN products p ON s.product_id = p.product_id
-                    LEFT JOIN categories c ON p.category_id = c.category_id
-                    WHERE s.quantity > 0
-                    ORDER BY l.location_name ASC, p.product_name ASC";
-
-            $stmt = $conn->prepare($sql);
-            $stmt->execute();
-            $stock = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // Calculate summary
-            $totalItems = count($stock);
-            $totalQuantity = array_sum(array_column($stock, 'quantity'));
-            $totalCostValue = array_sum(array_column($stock, 'total_cost_value'));
-            $totalSellingValue = array_sum(array_column($stock, 'total_selling_value'));
-
-            // Group by location for better organization
-            $stockByLocation = [];
-            foreach ($stock as $item) {
-                $locationId = $item['location_id'];
-                if (!isset($stockByLocation[$locationId])) {
-                    $stockByLocation[$locationId] = [
-                        'location_id' => $locationId,
-                        'location_name' => $item['location_name'],
-                        'location_type' => $item['location_type'],
-                        'items' => []
-                    ];
-                }
-                $stockByLocation[$locationId]['items'][] = $item;
-            }
-
-            echo json_encode([
-                'status' => 'success',
-                'message' => 'All stock retrieved successfully',
-                'data' => [
-                    'summary' => [
-                        'total_items' => $totalItems,
-                        'total_quantity' => $totalQuantity,
-                        'total_cost_value' => $totalCostValue,
-                        'total_selling_value' => $totalSellingValue,
-                        'potential_profit' => $totalSellingValue - $totalCostValue,
-                        'total_locations' => count($stockByLocation)
-                    ],
-                    'stock_by_location' => array_values($stockByLocation),
-                    'all_stock' => $stock
-                ]
-            ]);
-            
-        } catch (PDOException $e) {
-            echo json_encode([
-                'status' => 'error',
-                'message' => 'Database error: ' . $e->getMessage()
-            ]);
-        }
-    }
-
-    // Get low stock items
-    function getLowStock($json) {
-        include "connection-pdo.php";
-        
-        try {
-            $data = json_decode($json, true);
-            $threshold = $data['threshold'] ?? 10; // Default threshold of 10 units
-            $locationId = $data['location_id'] ?? null;
-
-            $sql = "SELECT 
-                        s.stock_id,
-                        s.location_id,
-                        s.product_id,
-                        s.quantity,
-                        s.unit_cost,
-                        s.last_updated,
-                        
-                        -- Location information
-                        l.location_name,
-                        l.location_type,
-                        
-                        -- Product information
-                        p.product_name,
-                        p.barcode,
-                        p.description as product_description,
-                        p.selling_price,
-                        
-                        -- Category information (if exists)
-                        c.category_id,
-                        c.category_name
-                        
-                    FROM stock s
-                    INNER JOIN locations l ON s.location_id = l.location_id
-                    INNER JOIN products p ON s.product_id = p.product_id
-                    LEFT JOIN categories c ON p.category_id = c.category_id
-                    WHERE s.quantity <= :threshold";
-
-            if ($locationId) {
-                $sql .= " AND s.location_id = :locationId";
-            }
-
-            $sql .= " ORDER BY s.quantity ASC, l.location_name ASC, p.product_name ASC";
-
-            $stmt = $conn->prepare($sql);
-            $stmt->bindValue(":threshold", $threshold, PDO::PARAM_INT);
-            
-            if ($locationId) {
-                $stmt->bindValue(":locationId", $locationId);
-            }
-            
-            $stmt->execute();
-            $lowStock = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            echo json_encode([
-                'status' => 'success',
-                'message' => 'Low stock items retrieved successfully',
-                'data' => [
-                    'threshold' => $threshold,
-                    'location_id' => $locationId,
-                    'total_low_stock_items' => count($lowStock),
-                    'low_stock_items' => $lowStock
-                ]
-            ]);
-            
-        } catch (PDOException $e) {
-            echo json_encode([
-                'status' => 'error',
-                'message' => 'Database error: ' . $e->getMessage()
-            ]);
-        }
-    }
 
 }
 
@@ -1284,14 +1033,14 @@ if ($operation === "createOrderAndReceiveStock") {
 } else {
     // Handle other operations
     switch($operation) {
-        case "getAllPurchaseOrders":
-            echo $stockIn->getAllPurchaseOrders();
+        case "getAllProductOrders":
+            echo $stockIn->getAllProductOrders();
             break;
         case "getAllStockReceives":
             echo $stockIn->getAllStockReceives();
             break;
-        case "getPurchaseOrder":
-            echo $stockIn->getPurchaseOrder($json);
+        case "getProductOrder":
+            echo $stockIn->getProductOrder($json);
             break;
         case "getStockReceive":
             echo $stockIn->getStockReceive($json);
@@ -1302,26 +1051,14 @@ if ($operation === "createOrderAndReceiveStock") {
         case "getStockReceivesBySupplier":
             echo $stockIn->getStockReceivesBySupplier($json);
             break;
-        case "getStockReceivesByLocation":
-            echo $stockIn->getStockReceivesByLocation($json);
+        case "getStockReceivesByWarehouse":
+            echo $stockIn->getStockReceivesByWarehouse($json);
             break;
         case "getStockReceivesByDateRange":
             echo $stockIn->getStockReceivesByDateRange($json);
             break;
         case "getStockReceivesByUser":
             echo $stockIn->getStockReceivesByUser($json);
-            break;
-        case "getOrdersWithReceiveStatus":
-            echo $stockIn->getOrdersWithReceiveStatus();
-            break;
-        case "getStockByLocation":
-            echo $stockIn->getStockByLocation($json);
-            break;
-        case "getAllStock":
-            echo $stockIn->getAllStock();
-            break;
-        case "getLowStock":
-            echo $stockIn->getLowStock($json);
             break;
         default:
             echo json_encode([

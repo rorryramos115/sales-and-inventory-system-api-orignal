@@ -47,7 +47,7 @@ CREATE TABLE user_assignments (
     is_active BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (user_id) REFERENCES users(user_id),
     FOREIGN KEY (location_id) REFERENCES locations(location_id),
-    UNIQUE KEY (user_id, location_id, assigned_date)
+    UNIQUE KEY (user_id, location_id)
 );
 
 
@@ -211,11 +211,11 @@ CREATE TABLE purchase_order_items (
 CREATE TABLE stock_receive (
     receive_id CHAR(36) PRIMARY KEY,
     receipt_code VARCHAR(50) UNIQUE NOT NULL,
-    supplier_invoice VARCHAR(100),
+    supplier_invoice VARCHAR(100) NOT NULL,
     order_id CHAR(36),
     receive_date DATE NOT NULL,
     supplier_id CHAR(36) NOT NULL,
-    location_id CHAR(36) NOT NULL, -- where stock is received (warehouse/store)
+    location_id CHAR(36) NOT NULL, 
     received_by CHAR(36) NOT NULL,
     total_amount DECIMAL(12,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -232,7 +232,7 @@ CREATE TABLE stock_receive_items (
     product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
-    batch_number VARCHAR(50),
+    batch_number VARCHAR(50) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (receive_id) REFERENCES stock_receive(receive_id),
