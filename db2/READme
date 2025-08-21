@@ -28,16 +28,6 @@ CREATE TABLE users (
     FOREIGN KEY (role_id) REFERENCES roles(role_id)
 );
 
--- User logins
--- CREATE TABLE user_logins (
---     login_id CHAR(36) PRIMARY KEY,
---     user_id CHAR(36) NOT NULL,
---     login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
---     ip_address VARCHAR(45),
---     user_agent TEXT,
---     success BOOLEAN DEFAULT TRUE,
---     FOREIGN KEY (user_id) REFERENCES users(user_id)
--- );
 
 CREATE TABLE user_assignments (
     assignment_id CHAR(36) PRIMARY KEY,
@@ -165,12 +155,16 @@ CREATE TABLE stock_transfers (
     to_location_id CHAR(36) NOT NULL,
     status ENUM('pending','approved','in_transit','completed','cancelled') DEFAULT 'pending',
     created_by CHAR(36) NOT NULL,
-    transfer_date DATE NOT NULL,
+    requested_date DATE NOT NULL,          -- when destination warehouse created request
+    approved_date DATE,                    -- when source approved
+    dispatched_date DATE,                  -- when source shipped
+    received_date DATE,                    -- when destination confirmed receipt
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (from_location_id) REFERENCES locations(location_id),
     FOREIGN KEY (to_location_id) REFERENCES locations(location_id),
     FOREIGN KEY (created_by) REFERENCES users(user_id)
 );
+
 
 CREATE TABLE stock_transfer_items (
     transfer_item_id CHAR(36) PRIMARY KEY,

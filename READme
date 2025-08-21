@@ -1,0 +1,94 @@
+http://localhost/Sales-Inventory/backend/warehouse.php?operation=getWarehousesByUserId&json={"user_id":"e10ea04f-f3d0-4b8b-bd29-54e232b3a0fd"}
+
+{
+  "transfer_id": "ade065c4-15a4-48d4-a6aa-5314b1fe46b2",
+  "items": [
+    {
+      "transfer_item_id": "e97b6a56-43d2-4a0a-84c0-5f23f4a0b26a",
+      "quantity_received": 50
+    },
+    {
+      "transfer_item_id": "5f3f52a8-1f25-45a0-80d4-d83e5f19b977",
+      "quantity_received": 50
+    }
+  ]
+}
+
+{
+  "status": "success",
+  "message": "Warehouses retrieved successfully for user",
+  "data": {
+    "user_details": {
+      "user_id": "e10ea04f-f3d0-4b8b-bd29-54e232b3a0fd",
+      "full_name": "Rorry Ramos",
+      "email": "manager1@example.com",
+      "phone": "+63 923 012 3456",
+      "role_name": "warehouse_manager",
+      "user_active": "1"
+    },
+    "summary": {
+      "total_warehouses": 1,
+      "active_assignments": 1,
+      "active_warehouses": 1
+    },
+    "warehouses": [
+      {
+        "location_id": "73172b01-c7c2-4e47-bbcb-5d0d303fc825",
+        "location_name": "SM Groceries Central Warehouse - Marikina",
+        "location_type": "warehouse",
+        "address": "Km. 21 East Service Road, Marikina City, Metro Manila, Philippines",
+        "location_active": "1",
+        "location_created_at": "2025-08-19 19:14:08",
+        "location_updated_at": "2025-08-19 19:14:08",
+        "assignment_id": "c81edc01-c1c8-44ca-af66-695b48e14222",
+        "assigned_date": "2025-08-20",
+        "assignment_active": "1",
+        "user_id": "e10ea04f-f3d0-4b8b-bd29-54e232b3a0fd",
+        "full_name": "Rorry Ramos",
+        "email": "manager1@example.com",
+        "phone": "+63 923 012 3456",
+        "user_active": "1",
+        "role_id": "7c87e1ab-5f3b-4b82-bfd4-2e94528cbdf1",
+        "role_name": "warehouse_manager"
+      }
+    ]
+  }
+}
+
+================================================================================================================================
+
+http://localhost/Sales-Inventory/backend/warehouse.php?operation=getTransferableWarehouses&json={"user_id":"e10ea04f-f3d0-4b8b-bd29-54e232b3a0fd", "from_location_id": "73172b01-c7c2-4e47-bbcb-5d0d303fc825"}
+
+{
+  "status": "success",
+  "message": "Transferable warehouses retrieved successfully",
+  "data": {
+    "warehouses": [
+      {
+        "location_id": "e115dc82-9c07-43a6-bba2-ebf66979c260",
+        "location_name": "Warehouse 1 updated",
+        "location_type": "warehouse",
+        "address": "Alubijid",
+        "is_active": "1",
+        "manager_name": "Andre Palomeras",
+        "manager_id": "b08b4f67-f89d-429c-b6e7-4d26f55a8698",
+        "assignment_id": "f1a453c0-0d8b-4846-98d5-4a0508d7f5e5",
+        "assigned_date": "2025-08-20"
+      },
+      {
+        "location_id": "83a205b6-2469-427f-ad0b-d27256303abe",
+        "location_name": "Warehouse 2",
+        "location_type": "warehouse",
+        "address": "Elsalvador City",
+        "is_active": "1",
+        "manager_name": "Rhick Orina",
+        "manager_id": "b5f5016b-2566-495d-81ea-9c29a1c2cb11",
+        "assignment_id": "4afaa19e-81c4-4178-abce-4a2cac9f87f1",
+        "assigned_date": "2025-08-20"
+      }
+    ],
+    "summary": {
+      "total_warehouses": 2
+    }
+  }
+}

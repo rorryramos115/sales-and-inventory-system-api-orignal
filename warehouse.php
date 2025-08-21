@@ -783,6 +783,147 @@ class Warehouse {
         }
     }
 
+    // Add this method to the Warehouse class in warehouse.php
+function getUserAssignedWarehouses($json) {
+    include "connection-pdo.php";
+    
+    try {
+        $data = json_decode($json, true);
+        
+        if(empty($data['user_id'])) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Missing required field: user_id'
+            ]);
+            return;
+        }
+
+        // Get warehouses assigned to the user
+        $sql = "SELECT 
+                    l.location_id,
+                    l.location_name,
+                    l.location_type,
+                    l.address,
+                    l.is_active,
+                    l.created_at,
+                    l.updated_at,
+                    ua.assignment_id,
+                    ua.assigned_date,
+                    ua.is_active as assignment_active
+                FROM user_assignments ua
+                INNER JOIN locations l ON ua.location_id = l.location_id
+                WHERE ua.user_id = :userId 
+                AND l.location_type = 'warehouse'
+                AND ua.is_active = 1
+                AND l.is_active = 1
+                ORDER BY l.location_name ASC";
+
+        $stmt = $conn->prepare($sql);
+        $stmt->bindValue(":userId", $data['user_id']);
+        $stmt->execute();
+        $warehouses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'User assigned warehouses retrieved successfully',
+            'data' => [
+                'warehouses' => $warehouses,
+                'total_count' => count($warehouses)
+            ]
+        ]);
+
+    } catch (PDOException $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Database error: ' . $e->getMessage()
+        ]);
+    } catch (Exception $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => $e->getMessage()
+        ]);
+    }
+}
+
+
+// Add this method to your Warehouse class in warehouse.php
+// Alternative: Only warehouses with active warehouse manager assignments
+function getTransferableWarehouses($json) {
+    include "connection-pdo.php";
+    
+    try {
+        $data = json_decode($json, true);
+        
+        if(empty($data['user_id'])) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Missing required field: user_id'
+            ]);
+            return;
+        }
+
+        if(empty($data['from_location_id'])) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Missing required field: from_location_id (current warehouse)'
+            ]);
+            return;
+        }
+
+        $userId = $data['user_id'];
+        $fromLocationId = $data['from_location_id'];
+
+        // Fetch warehouses managed by warehouse managers (excluding current warehouse)
+        $sql = "SELECT DISTINCT
+                    l.location_id,
+                    l.location_name,
+                    l.location_type,
+                    l.address,
+                    l.is_active,
+                    u.full_name as manager_name,
+                    u.user_id as manager_id,
+                    ua.assignment_id,
+                    ua.assigned_date
+                FROM user_assignments ua
+                INNER JOIN locations l ON ua.location_id = l.location_id
+                INNER JOIN users u ON ua.user_id = u.user_id
+                INNER JOIN roles r ON u.role_id = r.role_id
+                WHERE r.role_name = 'warehouse_manager'
+                AND l.location_type = 'warehouse'
+                AND ua.is_active = 1
+                AND l.is_active = 1
+                AND u.is_active = 1
+                AND l.location_id != :fromLocationId
+                ORDER BY l.location_name ASC";
+
+        $stmt = $conn->prepare($sql);
+        $stmt->bindValue(":fromLocationId", $fromLocationId);
+        $stmt->execute();
+        $warehouses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Transferable warehouses retrieved successfully',
+            'data' => [
+                'warehouses' => $warehouses,
+                'summary' => [
+                    'total_warehouses' => count($warehouses)
+                ]
+            ]
+        ]);
+
+    } catch (PDOException $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'Database error: ' . $e->getMessage()
+        ]);
+    } catch (Exception $e) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => $e->getMessage()
+        ]);
+    }
+}
 }
 
 // Handle the request
@@ -831,17 +972,27 @@ if ($operation === "createWarehouse") {
         case "searchWarehouses":
             $warehouse->searchWarehouses($json);
             break;
+            // -getWarehouseStock- get all proudcts stock in a warehouse
         case "getWarehouseStock":
             $warehouse->getWarehouseStock($json);
             break;
         case "getWarehouseStats":
             $warehouse->getWarehouseStats();
             break;
+            // -getWarehousesByUserId- get warehouse assigned to a specific user with user and warehouse details
         case "getWarehousesByUserId":
             $warehouse->getWarehousesByUserId($json);
             break;
+            // -getUserAssignedWarehouses- get users assigned to a specific warehouse with details
+        case "getUserAssignedWarehouses":
+            $warehouse->getUserAssignedWarehouses($json);
+            break;
         case "getUsersByWarehouseId":
             $warehouse->getUsersByWarehouseId($json);
+            break;
+        // -getTransferableWarehouses- get warehouse that can be transferred to another warehouse
+        case "getTransferableWarehouses":
+            $warehouse->getTransferableWarehouses($json);
             break;
         default:
             echo json_encode([
