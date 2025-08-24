@@ -250,6 +250,47 @@
         ]);
       }
     }
+
+   function getWarehouseManagerUsers() {
+      include "connection-pdo.php";
+
+      try {
+          $sql = "SELECT u.*, r.role_name 
+                  FROM users u 
+                  INNER JOIN roles r ON u.role_id = r.role_id 
+                  WHERE r.role_name = 'warehouse_manager' 
+                  AND u.is_active = TRUE
+                  AND u.user_id NOT IN (
+                      SELECT DISTINCT user_id 
+                      FROM assign_warehouse 
+                      WHERE is_active = TRUE
+                  )
+                  ORDER BY u.full_name";
+          
+          $stmt = $conn->prepare($sql);
+          $stmt->execute();
+          $rs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+          if (count($rs) > 0) {
+              echo json_encode([
+                  'status' => 'success',
+                  'message' => 'Available warehouse manager users retrieved successfully',
+                  'data' => $rs
+              ]);
+          } else {
+              echo json_encode([
+                  'status' => 'success',
+                  'message' => 'No available warehouse manager users found',
+                  'data' => []
+              ]);
+          }
+      } catch (PDOException $e) {
+          echo json_encode([
+              'status' => 'error',
+              'message' => 'Database error: ' . $e->getMessage()
+          ]);
+      }
+  }
   }
 
   //submitted by the client - operation and json
@@ -289,6 +330,9 @@
     case "deleteRole":
       echo $role->deleteRole($json);
       break;
+    case "getWarehouseManagerUsers":
+    echo $role->getWarehouseManagerUsers();
+    break;
     case "getRolesForDropdown":
       echo $role->getRolesForDropdown();
       break;

@@ -13,14 +13,14 @@ class Product {
         );
     }
 
-    // Insert a new product (handles FormData)
+    // Insert a new product (handles FormData) - Updated with required brands and units
     function insertProduct($data) {
         include "connection-pdo.php";
         $conn->beginTransaction();
 
         try {
-            // Validate required fields
-            $required = ['product_name', 'barcode', 'selling_price'];
+            // Validate required fields - now includes category_id, brand_id, unit_id
+            $required = ['product_name', 'barcode', 'selling_price', 'category_id', 'brand_id', 'unit_id'];
             foreach ($required as $field) {
                 if (empty($data[$field])) {
                     throw new Exception("Missing required field: $field");
@@ -42,16 +42,18 @@ class Product {
             $productName = $data['product_name'];
             $barcode = $data['barcode'];
             $sellingPrice = (float)$data['selling_price'];
-            $categoryId = !empty($data['category_id']) ? $data['category_id'] : null;
+            $categoryId = $data['category_id'];
+            $brandId = $data['brand_id'];
+            $unitId = $data['unit_id'];
             $description = $data['description'] ?? '';
             $isActive = $data['is_active'] ?? 1;
             
             // Insert product
             $sql = "INSERT INTO products(
-                        product_id, product_name, barcode, category_id, 
+                        product_id, product_name, barcode, category_id, brand_id, unit_id,
                         selling_price, is_active, description
                     ) VALUES(
-                        :productId, :productName, :barcode, :categoryId, 
+                        :productId, :productName, :barcode, :categoryId, :brandId, :unitId,
                         :sellingPrice, :isActive, :description
                     )";
             
@@ -59,7 +61,9 @@ class Product {
             $stmt->bindValue(":productId", $productId);
             $stmt->bindValue(":productName", $productName);
             $stmt->bindValue(":barcode", $barcode);
-            $stmt->bindValue(":categoryId", $categoryId, PDO::PARAM_STR);
+            $stmt->bindValue(":categoryId", $categoryId);
+            $stmt->bindValue(":brandId", $brandId);
+            $stmt->bindValue(":unitId", $unitId);
             $stmt->bindValue(":sellingPrice", $sellingPrice);
             $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
             $stmt->bindValue(":description", $description);
@@ -77,7 +81,10 @@ class Product {
                     'product_id' => $productId,
                     'product_name' => $productName,
                     'barcode' => $barcode,
-                    'selling_price' => $sellingPrice
+                    'selling_price' => $sellingPrice,
+                    'category_id' => $categoryId,
+                    'brand_id' => $brandId,
+                    'unit_id' => $unitId
                 ]
             ]);
             
@@ -90,7 +97,7 @@ class Product {
         }
     }
 
-    // Update product (handles FormData)
+    // Update product (handles FormData) - Updated with required brands and units
     function updateProduct($data) {
         include "connection-pdo.php";
         $conn->beginTransaction();
@@ -100,8 +107,8 @@ class Product {
                 throw new Exception("Product ID is required");
             }
             
-            // Validate required fields
-            $required = ['product_name', 'barcode', 'selling_price'];
+            // Validate required fields - now includes category_id, brand_id, unit_id
+            $required = ['product_name', 'barcode', 'selling_price', 'category_id', 'brand_id', 'unit_id'];
             foreach ($required as $field) {
                 if (empty($data[$field])) {
                     throw new Exception("Missing required field: $field");
@@ -112,7 +119,9 @@ class Product {
             $productName = $data['product_name'];
             $barcode = $data['barcode'];
             $sellingPrice = (float)$data['selling_price'];
-            $categoryId = !empty($data['category_id']) ? $data['category_id'] : null;
+            $categoryId = $data['category_id'];
+            $brandId = $data['brand_id'];
+            $unitId = $data['unit_id'];
             $description = $data['description'] ?? '';
             $isActive = $data['is_active'] ?? 1;
 
@@ -120,15 +129,20 @@ class Product {
                         product_name = :productName,
                         barcode = :barcode,
                         category_id = :categoryId,
+                        brand_id = :brandId,
+                        unit_id = :unitId,
                         selling_price = :sellingPrice,
                         is_active = :isActive,
-                        description = :description
+                        description = :description,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE product_id = :productId";
             
             $stmt = $conn->prepare($sql);
             $stmt->bindValue(":productName", $productName);
             $stmt->bindValue(":barcode", $barcode);
-            $stmt->bindValue(":categoryId", $categoryId, PDO::PARAM_STR);
+            $stmt->bindValue(":categoryId", $categoryId);
+            $stmt->bindValue(":brandId", $brandId);
+            $stmt->bindValue(":unitId", $unitId);
             $stmt->bindValue(":sellingPrice", $sellingPrice);
             $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
             $stmt->bindValue(":description", $description);
@@ -147,7 +161,10 @@ class Product {
                     'product_id' => $data['product_id'],
                     'product_name' => $productName,
                     'barcode' => $barcode,
-                    'selling_price' => $sellingPrice
+                    'selling_price' => $sellingPrice,
+                    'category_id' => $categoryId,
+                    'brand_id' => $brandId,
+                    'unit_id' => $unitId
                 ]
             ]);
             
@@ -160,14 +177,27 @@ class Product {
         }
     }
 
-    // Get all products
+    // Get all products - Updated with brands and units joins
     function getAllProducts() {
         include "connection-pdo.php";
 
         try {
-            $sql = "SELECT p.*, c.category_name
+            $sql = "SELECT 
+                        p.product_id,
+                        p.product_name,
+                        p.barcode,
+                        p.selling_price,
+                        p.description,
+                        p.is_active,
+                        p.created_at,
+                        p.updated_at,
+                        c.category_name,
+                        b.brand_name,
+                        u.unit_name
                     FROM products p 
-                    LEFT JOIN categories c ON p.category_id = c.category_id 
+                    JOIN categories c ON p.category_id = c.category_id 
+                    JOIN brands b ON p.brand_id = b.brand_id
+                    JOIN units u ON p.unit_id = u.unit_id
                     ORDER BY p.product_name";
             
             $stmt = $conn->prepare($sql);
@@ -187,7 +217,7 @@ class Product {
         }
     }
 
-    // Get a single product
+    // Get a single product - Updated with brands and units joins
     function getProduct($json) {
         include "connection-pdo.php";
         
@@ -202,9 +232,25 @@ class Product {
                 return;
             }
 
-            $sql = "SELECT p.*, c.category_name
+            $sql = "SELECT 
+                        p.product_id,
+                        p.product_name,
+                        p.barcode,
+                        p.selling_price,
+                        p.description,
+                        p.is_active,
+                        p.created_at,
+                        p.updated_at,
+                        p.category_id,
+                        p.brand_id,
+                        p.unit_id,
+                        c.category_name,
+                        b.brand_name,
+                        u.unit_name
                     FROM products p 
-                    LEFT JOIN categories c ON p.category_id = c.category_id 
+                    JOIN categories c ON p.category_id = c.category_id 
+                    JOIN brands b ON p.brand_id = b.brand_id
+                    JOIN units u ON p.unit_id = u.unit_id
                     WHERE p.product_id = :productId";
             
             $stmt = $conn->prepare($sql);
@@ -232,7 +278,7 @@ class Product {
         }
     }
 
-    // Delete a product
+    // Delete a product - remains the same
     function deleteProduct($json) {
         include "connection-pdo.php";
         
@@ -274,7 +320,7 @@ class Product {
         }
     }
 
-    // Check if barcode exists
+    // Check if barcode exists - remains the same
     function checkBarcode($json) {
         include "connection-pdo.php";
         
@@ -321,7 +367,7 @@ class Product {
         }
     }
 
-    // Search products by name or barcode
+    // Search products by name or barcode - Updated with brands and units joins
     function searchProducts($json) {
         include "connection-pdo.php";
         
@@ -337,11 +383,25 @@ class Product {
             }
 
             $searchTerm = '%' . $json['search_term'] . '%';
-            $sql = "SELECT p.*, c.category_name
+            $sql = "SELECT 
+                        p.product_id,
+                        p.product_name,
+                        p.barcode,
+                        p.selling_price,
+                        p.description,
+                        p.is_active,
+                        c.category_name,
+                        b.brand_name,
+                        u.unit_name
                     FROM products p 
-                    LEFT JOIN categories c ON p.category_id = c.category_id 
-                    WHERE p.product_name LIKE :searchTerm 
+                    JOIN categories c ON p.category_id = c.category_id 
+                    JOIN brands b ON p.brand_id = b.brand_id
+                    JOIN units u ON p.unit_id = u.unit_id
+                    WHERE (p.product_name LIKE :searchTerm 
                     OR p.barcode LIKE :searchTerm
+                    OR c.category_name LIKE :searchTerm
+                    OR b.brand_name LIKE :searchTerm)
+                    AND p.is_active = 1
                     ORDER BY p.product_name
                     LIMIT 20";
             
@@ -363,7 +423,7 @@ class Product {
         }
     }
 
-    // Add this method to your Product class
+    // Get available products for supplier - Updated with brands and units joins
     function getAvailableProductsForSupplier($json) {
         include "connection-pdo.php";
         
@@ -378,9 +438,19 @@ class Product {
                 return;
             }
 
-            $sql = "SELECT p.*, c.category_name
+            $sql = "SELECT 
+                        p.product_id,
+                        p.product_name,
+                        p.barcode,
+                        p.selling_price,
+                        p.description,
+                        c.category_name,
+                        b.brand_name,
+                        u.unit_name
                     FROM products p 
-                    LEFT JOIN categories c ON p.category_id = c.category_id 
+                    JOIN categories c ON p.category_id = c.category_id 
+                    JOIN brands b ON p.brand_id = b.brand_id
+                    JOIN units u ON p.unit_id = u.unit_id
                     WHERE p.is_active = 1
                     AND p.product_id NOT IN (
                         SELECT product_id 
@@ -408,7 +478,7 @@ class Product {
         }
     }
 
-    // Add this method to your Product class
+    // Get supplier products - Updated with brands and units joins
     function getSupplierProducts($json) {
         include "connection-pdo.php";
         
@@ -431,11 +501,15 @@ class Product {
                         p.description,
                         p.is_active as product_active,
                         c.category_name,
+                        b.brand_name,
+                        u.unit_name,
                         sp.supplier_product_id,
                         sp.is_active as supplier_product_active
                     FROM supplier_products sp
                     JOIN products p ON sp.product_id = p.product_id
-                    LEFT JOIN categories c ON p.category_id = c.category_id
+                    JOIN categories c ON p.category_id = c.category_id
+                    JOIN brands b ON p.brand_id = b.brand_id
+                    JOIN units u ON p.unit_id = u.unit_id
                     WHERE sp.supplier_id = :supplierId
                     ORDER BY p.product_name";
             
@@ -456,9 +530,90 @@ class Product {
             ]);
         }
     }
+
+    // New helper function to get all categories
+    function getAllCategories() {
+        include "connection-pdo.php";
+        
+        try {
+            $sql = "SELECT category_id, category_name, description, is_active 
+                    FROM categories 
+                    WHERE is_active = 1 
+                    ORDER BY category_name";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Categories retrieved successfully',
+                'data' => $categories
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    // New helper function to get all brands
+    function getAllBrands() {
+        include "connection-pdo.php";
+        
+        try {
+            $sql = "SELECT brand_id, brand_name, is_active 
+                    FROM brands 
+                    WHERE is_active = 1 
+                    ORDER BY brand_name";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $brands = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Brands retrieved successfully',
+                'data' => $brands
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    // New helper function to get all units
+    function getAllUnits() {
+        include "connection-pdo.php";
+        
+        try {
+            $sql = "SELECT unit_id, unit_name, is_active 
+                    FROM units 
+                    WHERE is_active = 1 
+                    ORDER BY unit_name";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $units = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Units retrieved successfully',
+                'data' => $units
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
 }
 
-// Request handling remains the same as before
+// Request handling
 if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $operation = $_GET['operation'] ?? '';
     $json = $_GET['json'] ?? '{}';
@@ -492,25 +647,34 @@ try {
     } else {
         switch($operation) {
             case "getAllProducts":
-                echo $product->getAllProducts();
+                $product->getAllProducts();
                 break;
             case "getProduct":
-                echo $product->getProduct($json);
+                $product->getProduct($json);
                 break;
             case "deleteProduct":
-                echo $product->deleteProduct($json);
+                $product->deleteProduct($json);
                 break;
             case "checkBarcode":
-                echo $product->checkBarcode($json);
+                $product->checkBarcode($json);
                 break;
             case "searchProducts":
-                echo $product->searchProducts($json);
+                $product->searchProducts($json);
                 break;
             case "getAvailableProductsForSupplier":
-                echo $product->getAvailableProductsForSupplier($json);
+                $product->getAvailableProductsForSupplier($json);
                 break;
             case "getSupplierProducts":
-                echo $product->getSupplierProducts($json);
+                $product->getSupplierProducts($json);
+                break;
+            case "getAllCategories":
+                $product->getAllCategories();
+                break;
+            case "getAllBrands":
+                $product->getAllBrands();
+                break;
+            case "getAllUnits":
+                $product->getAllUnits();
                 break;
             default:
                 echo json_encode([
