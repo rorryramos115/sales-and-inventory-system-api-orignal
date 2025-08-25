@@ -363,6 +363,36 @@ class SupplierProduct {
             ]);
         }
     }
+
+    function getSuppliersWithProducts() {
+          include "connection-pdo.php";
+
+        try {
+            $sql = "SELECT s.*, COUNT(sp.product_id) as product_count
+                    FROM suppliers s
+                    INNER JOIN supplier_products sp ON s.supplier_id = sp.supplier_id
+                    WHERE s.is_active = 1 AND sp.is_active = 1
+                    GROUP BY s.supplier_id
+                    HAVING product_count > 0
+                    ORDER BY s.supplier_name";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $suppliers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Suppliers with products retrieved successfully',
+                'data' => $suppliers,
+                'count' => count($suppliers)
+            ]);
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
 }
 
 // Handle request
@@ -410,6 +440,9 @@ if ($operation === "insertSupplierProduct") {
             break;
         case "searchSupplierProducts":
             $supplierProduct->searchSupplierProducts($json);
+            break;
+        case "getSuppliersWithProducts":
+            $supplierProduct->getSuppliersWithProducts();
             break;
         default:
             echo json_encode([

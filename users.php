@@ -57,7 +57,11 @@ class User {
             $required = ['full_name', 'email', 'password', 'role_id'];
             foreach ($required as $field) {
                 if (empty($data[$field])) {
-                    throw new Exception("Missing required field: $field");
+                    echo json_encode([
+                        'status' => 'error',
+                        'message' => "Missing required field: $field"
+                    ]);
+                    return;
                 }
             }
 
@@ -69,7 +73,11 @@ class User {
             $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
             
             if ($result['count'] > 0) {
-                throw new Exception("Email already exists");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Email already exists'
+                ]);
+                return;
             }
 
             // Generate UUID
@@ -105,31 +113,16 @@ class User {
             $stmt->bindValue(":mustChangePassword", $mustChangePassword, PDO::PARAM_INT);
             
             if (!$stmt->execute()) {
-                throw new Exception("Failed to create user");
-            }
-
-            // Handle location assignment if provided
-            if (!empty($data['location_id'])) {
-                $assignmentId = $this->generateUuid();
-                $assignmentSql = "INSERT INTO user_assignments(
-                                    assignment_id, user_id, location_id, assigned_date
-                                ) VALUES(
-                                    :assignmentId, :userId, :locationId, CURDATE()
-                                )";
-                
-                $assignmentStmt = $conn->prepare($assignmentSql);
-                $assignmentStmt->bindValue(":assignmentId", $assignmentId);
-                $assignmentStmt->bindValue(":userId", $userId);
-                $assignmentStmt->bindValue(":locationId", $data['location_id']);
-                
-                if (!$assignmentStmt->execute()) {
-                    throw new Exception("Failed to assign location to user");
-                }
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Failed to create user'
+                ]);
+                return;
             }
 
             $conn->commit(); 
             
-            return json_encode([
+            echo json_encode([
                 'status' => 'success',
                 'message' => 'User created successfully',
                 'data' => [
@@ -139,17 +132,17 @@ class User {
                 ]
             ]);
             
-        } catch (Exception $e) {
+        } catch (PDOException $e) {
             $conn->rollBack();
-            return json_encode([
+            echo json_encode([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => 'Database error: ' . $e->getMessage()
             ]);
         }
     }
 
     // Get a single user with role information and location assignment
-    function getUser($json) {
+     function getUser($json) {
         include "connection-pdo.php";
         
         try {
@@ -163,12 +156,9 @@ class User {
                 return;
             }
 
-            $sql = "SELECT u.*, r.role_name, 
-                    l.location_id, l.location_name, l.location_type
+            $sql = "SELECT u.*, r.role_name
                     FROM users u 
                     LEFT JOIN roles r ON u.role_id = r.role_id 
-                    LEFT JOIN user_assignments ua ON u.user_id = ua.user_id AND ua.is_active = 1
-                    LEFT JOIN locations l ON ua.location_id = l.location_id
                     WHERE u.user_id = :userId";
             $stmt = $conn->prepare($sql);
             $stmt->bindValue(":userId", $json['user_id']);
@@ -197,6 +187,7 @@ class User {
         }
     }
 
+
     // Update user information
     function updateUser($data) {
         include "connection-pdo.php";
@@ -204,13 +195,21 @@ class User {
 
         try {
             if (empty($data['user_id'])) {
-                throw new Exception("User ID is required");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'User ID is required'
+                ]);
+                return;
             }
 
             $required = ['full_name', 'email', 'role_id'];
             foreach ($required as $field) {
                 if (empty($data[$field])) {
-                    throw new Exception("Missing required field: $field");
+                    echo json_encode([
+                        'status' => 'error',
+                        'message' => "Missing required field: $field"
+                    ]);
+                    return;
                 }
             }
 
@@ -222,7 +221,11 @@ class User {
             $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
             
             if ($result['count'] > 0) {
-                throw new Exception("Email already exists");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Email already exists'
+                ]);
+                return;
             }
 
             $fullName = $data['full_name'];
@@ -258,42 +261,16 @@ class User {
             $stmt->bindValue(":userId", $data['user_id']);
             
             if (!$stmt->execute()) {
-                throw new Exception("Failed to update user");
-            }
-            
-            // Handle location assignment if provided
-            if (isset($data['location_id'])) {
-                // First, deactivate any existing assignments
-                $deactivateSql = "UPDATE user_assignments 
-                                 SET is_active = 0 
-                                 WHERE user_id = :userId";
-                $deactivateStmt = $conn->prepare($deactivateSql);
-                $deactivateStmt->bindValue(":userId", $data['user_id']);
-                $deactivateStmt->execute();
-                
-                // If a new location is provided, create a new assignment
-                if (!empty($data['location_id'])) {
-                    $assignmentId = $this->generateUuid();
-                    $assignmentSql = "INSERT INTO user_assignments(
-                                        assignment_id, user_id, location_id, assigned_date
-                                    ) VALUES(
-                                        :assignmentId, :userId, :locationId, CURDATE()
-                                    )";
-                    
-                    $assignmentStmt = $conn->prepare($assignmentSql);
-                    $assignmentStmt->bindValue(":assignmentId", $assignmentId);
-                    $assignmentStmt->bindValue(":userId", $data['user_id']);
-                    $assignmentStmt->bindValue(":locationId", $data['location_id']);
-                    
-                    if (!$assignmentStmt->execute()) {
-                        throw new Exception("Failed to assign location to user");
-                    }
-                }
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Failed to update user'
+                ]);
+                return;
             }
             
             $conn->commit();
             
-            return json_encode([
+            echo json_encode([
                 'status' => 'success',
                 'message' => 'User updated successfully',
                 'data' => [
@@ -303,11 +280,11 @@ class User {
                 ]
             ]);
             
-        } catch (Exception $e) {
+        } catch (PDOException $e) {
             $conn->rollBack();
-            return json_encode([
+            echo json_encode([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => 'Database error: ' . $e->getMessage()
             ]);
         }
     }
@@ -327,12 +304,6 @@ class User {
                 ]);
                 return;
             }
-
-            // First delete user assignments
-            $deleteAssignmentsSql = "DELETE FROM user_assignments WHERE user_id = :userId";
-            $deleteAssignmentsStmt = $conn->prepare($deleteAssignmentsSql);
-            $deleteAssignmentsStmt->bindParam(":userId", $json['user_id']);
-            $deleteAssignmentsStmt->execute();
 
             // Then delete the user
             $sql = "DELETE FROM users WHERE user_id = :userId";
@@ -372,7 +343,11 @@ class User {
             $data = is_array($input) ? $input : json_decode($input, true);
             
             if(empty($data['email']) || empty($data['password'])) {
-                throw new Exception("Email and password are required");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Email and password are required'
+                ]);
+                return;
             }
 
             $sql = "SELECT u.*, r.role_name 
@@ -386,7 +361,11 @@ class User {
 
             // Check if user exists
             if(!$user) {
-                throw new Exception("Invalid email or password");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Invalid email or password'
+                ]);
+                return;
             }
 
             if(!$user['is_active']) {
@@ -399,28 +378,37 @@ class User {
             
             // Verify password
             if(!password_verify($data['password'], $user['password'])) {
-                throw new Exception("Invalid email or password");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Invalid email or password'
+                ]);
+                return;
             }
 
-            // For warehouse managers and store staff - check location assignment
-            if ($user['role_name'] === 'warehouse_manager' || $user['role_name'] === 'store_staff') {
-                $locationSql = "SELECT l.location_id, l.location_name, l.location_type
-                                FROM user_assignments ua
-                                JOIN locations l ON ua.location_id = l.location_id
-                                WHERE ua.user_id = :userId AND ua.is_active = 1
+            // For warehouse managers - check warehouse assignment
+            if ($user['role_name'] === 'warehouse_manager') {
+                $warehouseSql = "SELECT w.warehouse_id, w.warehouse_name, w.address, is_main
+                                FROM assign_warehouse aw
+                                JOIN warehouses w ON aw.warehouse_id = w.warehouse_id
+                                WHERE aw.user_id = :userId AND aw.is_active = 1
                                 LIMIT 1";
-                $locationStmt = $conn->prepare($locationSql);
-                $locationStmt->bindValue(":userId", $user['user_id']);
-                $locationStmt->execute();
-                $location = $locationStmt->fetch(PDO::FETCH_ASSOC);
+                $warehouseStmt = $conn->prepare($warehouseSql);
+                $warehouseStmt->bindValue(":userId", $user['user_id']);
+                $warehouseStmt->execute();
+                $warehouse = $warehouseStmt->fetch(PDO::FETCH_ASSOC);
                 
-                if (!$location) {
-                    throw new Exception("No location assigned to this user");
+                if (!$warehouse) {
+                    echo json_encode([
+                        'status' => 'error',
+                        'message' => 'No warehouse assigned to this user'
+                    ]);
+                    return;
                 }
                 
-                $user['location_id'] = $location['location_id'];
-                $user['location_name'] = $location['location_name'];
-                $user['location_type'] = $location['location_type'];
+                $user['warehouse_id'] = $warehouse['warehouse_id'];
+                $user['warehouse_name'] = $warehouse['warehouse_name'];
+                $user['address'] = $warehouse['address'];
+                $user['is_main'] = $warehouse['is_main'];
             }
 
             // Check if user must change password
@@ -447,15 +435,9 @@ class User {
                 'status' => 'error',
                 'message' => 'Database error: ' . $e->getMessage()
             ]);
-        } catch (Exception $e) {
-            echo json_encode([
-                'status' => 'error',
-                'message' => $e->getMessage()
-            ]);
         }
     }
 
-    // Change password for first login
     function changeFirstLoginPassword($data) {
         include "connection-pdo.php";
         $conn->beginTransaction();
@@ -464,7 +446,11 @@ class User {
             $required = ['user_id', 'current_password', 'new_password'];
             foreach ($required as $field) {
                 if (empty($data[$field])) {
-                    throw new Exception("Missing required field: $field");
+                    echo json_encode([
+                        'status' => 'error',
+                        'message' => "Missing required field: $field"
+                    ]);
+                    return;
                 }
             }
 
@@ -476,22 +462,38 @@ class User {
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user) {
-                throw new Exception("User not found");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ]);
+                return;
             }
 
             // Verify current password
             if (!password_verify($data['current_password'], $user['password'])) {
-                throw new Exception("Current password is incorrect");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Current password is incorrect'
+                ]);
+                return;
             }
 
             // Validate new password
             if (strlen($data['new_password']) < 8) {
-                throw new Exception("New password must be at least 8 characters long");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'New password must be at least 8 characters long'
+                ]);
+                return;
             }
 
             // Check if new password is different from current
             if (password_verify($data['new_password'], $user['password'])) {
-                throw new Exception("New password must be different from current password");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'New password must be different from current password'
+                ]);
+                return;
             }
 
             // Hash new password
@@ -507,38 +509,42 @@ class User {
             $stmt->execute();
             $updatedUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // For warehouse managers and store staff - get location assignment
-            if ($updatedUser['role_name'] === 'warehouse_manager' || $updatedUser['role_name'] === 'store_staff') {
-                $locationSql = "SELECT l.location_id, l.location_name, l.location_type
-                                FROM user_assignments ua
-                                JOIN locations l ON ua.location_id = l.location_id
-                                WHERE ua.user_id = :userId AND ua.is_active = 1
+            // For warehouse managers - get warehouse assignment
+            if ($updatedUser['role_name'] === 'warehouse_manager') {
+                $warehouseSql = "SELECT w.warehouse_id, w.warehouse_name, w.address
+                                FROM assign_warehouse aw
+                                JOIN warehouses w ON aw.warehouse_id = w.warehouse_id
+                                WHERE aw.user_id = :userId AND aw.is_active = 1
                                 LIMIT 1";
-                $locationStmt = $conn->prepare($locationSql);
-                $locationStmt->bindValue(":userId", $updatedUser['user_id']);
-                $locationStmt->execute();
-                $location = $locationStmt->fetch(PDO::FETCH_ASSOC);
+                $warehouseStmt = $conn->prepare($warehouseSql);
+                $warehouseStmt->bindValue(":userId", $updatedUser['user_id']);
+                $warehouseStmt->execute();
+                $warehouse = $warehouseStmt->fetch(PDO::FETCH_ASSOC);
                 
-                if ($location) {
-                    $updatedUser['location_id'] = $location['location_id'];
-                    $updatedUser['location_name'] = $location['location_name'];
-                    $updatedUser['location_type'] = $location['location_type'];
+                if ($warehouse) {
+                    $updatedUser['warehouse_id'] = $warehouse['warehouse_id'];
+                    $updatedUser['warehouse_name'] = $warehouse['warehouse_name'];
+                    $updatedUser['address'] = $warehouse['address'];
                 }
             }
 
-             // Update password and clear must_change_password flag
+            // Update password and clear must_change_password flag
             $updateSql = "UPDATE users SET 
                             password = :newPassword, 
                             must_change_password = 0,
                             updated_at = CURRENT_TIMESTAMP
-                          WHERE user_id = :userId";
+                        WHERE user_id = :userId";
             
             $updateStmt = $conn->prepare($updateSql);
             $updateStmt->bindValue(":newPassword", $hashedPassword);
             $updateStmt->bindValue(":userId", $data['user_id']);
             
             if (!$updateStmt->execute()) {
-                throw new Exception("Failed to update password");
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Failed to update password'
+                ]);
+                return;
             }
 
             $conn->commit();
@@ -551,11 +557,11 @@ class User {
                 'data' => $updatedUser
             ]);
 
-        } catch (Exception $e) {
+        } catch (PDOException $e) {
             $conn->rollBack();
             echo json_encode([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => 'Database error: ' . $e->getMessage()
             ]);
         }
     }
@@ -705,38 +711,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
 
 switch ($operation) {
     case "insertUser":
-        echo $user->insertUser($data);
+        $user->insertUser($data);
         break;
     case "updateUser":
-        echo $user->updateUser($data);
+        $user->updateUser($data);
         break;
     case "login":
-        echo $user->login($data);
+        $user->login($data);
         break;
     case "changeFirstLoginPassword":
-        echo $user->changeFirstLoginPassword($data);
+        $user->changeFirstLoginPassword($data);
         break;
     case "countUserStatus":
-        echo $user->countUserStatus();
+        $user->countUserStatus();
         break;
     case "getAllUsers":
-        echo $user->getAllUsers();
+        $user->getAllUsers();
         break;
     case "getUser":
         $json = $_GET['json'] ?? '{}';
-        echo $user->getUser($json);
+        $user->getUser($json);
         break;
     case "deleteUser":
         $json = $_GET['json'] ?? '{}';
-        echo $user->deleteUser($json);
+        $user->deleteUser($json);
         break;
     case "checkEmail":
         $json = $_GET['json'] ?? '{}';
-        echo $user->checkEmail($json);
+        $user->checkEmail($json);
         break;
     case "searchUsers":
         $json = $_GET['json'] ?? '{}';
-        echo $user->searchUsers($json);
+        $user->searchUsers($json);
         break;
     default:
         echo json_encode([
