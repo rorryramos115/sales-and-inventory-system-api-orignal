@@ -316,6 +316,7 @@ CREATE TABLE stock_adjustment_items (
 CREATE TABLE supplier_returns (
     return_id CHAR(36) PRIMARY KEY,
     supplier_id CHAR(36) NOT NULL,
+    order_id CHAR(36),
     return_date DATE NOT NULL,
     warehouse_id CHAR(36) NOT NULL,
     reason TEXT,
@@ -323,6 +324,7 @@ CREATE TABLE supplier_returns (
     total_amount DECIMAL(10,2) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id),
+    FOREIGN KEY (order_id) REFERENCES purchase_orders(order_id),
     FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
     FOREIGN KEY (returned_by) REFERENCES users(user_id)
 );
