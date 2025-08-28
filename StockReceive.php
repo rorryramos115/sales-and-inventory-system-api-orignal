@@ -22,7 +22,246 @@ class StockReceive {
         );
     }
 
+    private function generateSupplierReceipt($conn, $warehouseId) {
+        try {
+            // Get warehouse prefix (first 2 characters of warehouse name, or WH if not available)
+            $warehouseSql = "SELECT warehouse_name FROM warehouses WHERE warehouse_id = :warehouseId";
+            $warehouseStmt = $conn->prepare($warehouseSql);
+            $warehouseStmt->bindValue(":warehouseId", $warehouseId);
+            $warehouseStmt->execute();
+            $warehouse = $warehouseStmt->fetch(PDO::FETCH_ASSOC);
+            
+            $warehousePrefix = 'WH';
+            if ($warehouse && !empty($warehouse['warehouse_name'])) {
+                $warehousePrefix = strtoupper(substr(preg_replace('/[^a-zA-Z]/', '', $warehouse['warehouse_name']), 0, 2));
+                if (strlen($warehousePrefix) < 2) {
+                    $warehousePrefix = 'WH';
+                }
+            }
+            
+            // Get current date components
+            $year = date('y');
+            $month = date('m');
+            $day = date('d');
+            
+            // Get the next sequence number for today
+            $sequenceSql = "SELECT COUNT(*) as count FROM stock_receive 
+                           WHERE DATE(created_at) = CURDATE() 
+                           AND supplier_receipt LIKE :pattern";
+            $pattern = "REC-{$warehousePrefix}-{$year}{$month}{$day}-%";
+            
+            $sequenceStmt = $conn->prepare($sequenceSql);
+            $sequenceStmt->bindValue(":pattern", $pattern);
+            $sequenceStmt->execute();
+            $result = $sequenceStmt->fetch(PDO::FETCH_ASSOC);
+            
+            $sequence = str_pad(($result['count'] + 1), 3, '0', STR_PAD_LEFT);
+            
+            // Generate receipt number: REC-WH-YYMMDD-001
+            $receiptNumber = "REC-{$warehousePrefix}-{$year}{$month}{$day}-{$sequence}";
+            
+            // Verify uniqueness (in case of concurrent requests)
+            $checkSql = "SELECT receive_id FROM stock_receive WHERE supplier_receipt = :receiptNumber";
+            $checkStmt = $conn->prepare($checkSql);
+            $checkStmt->bindValue(":receiptNumber", $receiptNumber);
+            $checkStmt->execute();
+            
+            // If exists, add timestamp suffix to ensure uniqueness
+            if ($checkStmt->fetch()) {
+                $timestamp = substr(str_replace('.', '', microtime(true)), -4);
+                $receiptNumber = "REC-{$warehousePrefix}-{$year}{$month}{$day}-{$sequence}-{$timestamp}";
+            }
+            
+            return $receiptNumber;
+            
+        } catch (Exception $e) {
+            // Fallback to UUID-based receipt number if generation fails
+            return "REC-" . strtoupper(substr($this->generateUuid(), 0, 8));
+        }
+    }
+
+
     // Receive stock against a purchase order
+    // function receiveStock($data) {
+    //     include "connection-pdo.php";
+    //     $conn->beginTransaction();
+
+    //     try {
+    //         if (empty($data['order_id'])) {
+    //             throw new Exception("Order ID is required");
+    //         }
+    //         if (empty($data['warehouse_id'])) {
+    //             throw new Exception("Warehouse ID is required");
+    //         }
+    //         if (empty($data['received_by'])) {
+    //             throw new Exception("Received by user ID is required");
+    //         }
+    //         if (empty($data['supplier_receipt'])) {
+    //             throw new Exception("Supplier receipt number is required");
+    //         }
+    //         if (empty($data['items']) || !is_array($data['items'])) {
+    //             throw new Exception("Items are required");
+    //         }
+
+    //         // Verify purchase order exists and get order items
+    //         $orderCheckSql = "SELECT 
+    //                             po.order_id, po.supplier_id, po.total_amount,
+    //                             poi.product_id, poi.quantity as ordered_quantity, poi.unit_cost
+    //                           FROM purchase_orders po
+    //                           INNER JOIN purchase_order_items poi ON po.order_id = poi.order_id
+    //                           WHERE po.order_id = :orderId";
+    //         $orderCheckStmt = $conn->prepare($orderCheckSql);
+    //         $orderCheckStmt->bindValue(":orderId", $data['order_id']);
+    //         $orderCheckStmt->execute();
+    //         $orderItems = $orderCheckStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    //         if (!$orderItems) {
+    //             throw new Exception("Purchase order not found");
+    //         }
+
+    //         $order = [
+    //             'order_id' => $orderItems[0]['order_id'],
+    //             'supplier_id' => $orderItems[0]['supplier_id'],
+    //             'total_amount' => $orderItems[0]['total_amount']
+    //         ];
+
+    //         // Check if already received
+    //         $receiveCheckSql = "SELECT receive_id FROM stock_receive WHERE order_id = :orderId";
+    //         $receiveCheckStmt = $conn->prepare($receiveCheckSql);
+    //         $receiveCheckStmt->bindValue(":orderId", $data['order_id']);
+    //         $receiveCheckStmt->execute();
+            
+    //         if ($receiveCheckStmt->fetch()) {
+    //             throw new Exception("This purchase order has already been received");
+    //         }
+
+    //         // Create array of ordered items for validation
+    //         $orderedItems = [];
+    //         foreach ($orderItems as $item) {
+    //             $orderedItems[$item['product_id']] = [
+    //                 'ordered_quantity' => $item['ordered_quantity'],
+    //                 'unit_cost' => $item['unit_cost']
+    //             ];
+    //         }
+
+    //         // Generate UUID
+    //         $receiveId = $this->generateUuid();
+            
+    //         // Prepare data
+    //         $receiveDate = $data['receive_date'] ?? date('Y-m-d');
+            
+    //         // Calculate total amount from received items and validate
+    //         $totalAmount = 0;
+    //         $returnItems = []; // Track items that need to be returned to supplier
+            
+    //         foreach ($data['items'] as $item) {
+    //             if (empty($item['product_id']) || !isset($item['quantity_receive']) || empty($item['unit_cost'])) {
+    //                 throw new Exception("Product ID, quantity_receive, and unit cost are required for all items");
+    //             }
+
+    //             // Validate that product exists in the order
+    //             if (!isset($orderedItems[$item['product_id']])) {
+    //                 throw new Exception("Product {$item['product_id']} is not in the original purchase order");
+    //             }
+
+    //             $orderedQty = $orderedItems[$item['product_id']]['ordered_quantity'];
+    //             $receivedQty = $item['quantity_receive'];
+
+    //             // Validate received quantity doesn't exceed ordered quantity
+    //             if ($receivedQty > $orderedQty) {
+    //                 throw new Exception("Received quantity ({$receivedQty}) cannot exceed ordered quantity ({$orderedQty}) for product {$item['product_id']}");
+    //             }
+
+    //             $totalAmount += $receivedQty * $item['unit_cost'];
+
+    //             // Track items that need to be returned to supplier
+    //             if ($receivedQty < $orderedQty) {
+    //                 $returnItems[] = [
+    //                     'product_id' => $item['product_id'],
+    //                     'ordered_quantity' => $orderedQty,
+    //                     'received_quantity' => $receivedQty,
+    //                     'return_quantity' => $orderedQty - $receivedQty,
+    //                     'unit_cost' => $item['unit_cost']
+    //                 ];
+    //             }
+    //         }
+
+    //         // Insert stock receive record
+    //         $receiveSql = "INSERT INTO stock_receive(
+    //                         receive_id, supplier_receipt, order_id, 
+    //                         receive_date, supplier_id, warehouse_id, received_by, total_amount
+    //                     ) VALUES(
+    //                         :receiveId, :supplierReceipt, :orderId, 
+    //                         :receiveDate, :supplierId, :warehouseId, :receivedBy, :totalAmount
+    //                     )";
+            
+    //         $receiveStmt = $conn->prepare($receiveSql);
+    //         $receiveStmt->bindValue(":receiveId", $receiveId);
+    //         $receiveStmt->bindValue(":supplierReceipt", $data['supplier_receipt']);
+    //         $receiveStmt->bindValue(":orderId", $data['order_id']);
+    //         $receiveStmt->bindValue(":receiveDate", $receiveDate);
+    //         $receiveStmt->bindValue(":supplierId", $order['supplier_id']);
+    //         $receiveStmt->bindValue(":warehouseId", $data['warehouse_id']);
+    //         $receiveStmt->bindValue(":receivedBy", $data['received_by']);
+    //         $receiveStmt->bindValue(":totalAmount", $totalAmount);
+            
+    //         if (!$receiveStmt->execute()) {
+    //             throw new Exception("Failed to create stock receive record");
+    //         }
+
+    //         // Process each item
+    //         foreach ($data['items'] as $item) {
+    //             $receiveItemId = $this->generateUuid();
+                
+    //             // Insert stock receive item with quantity_receive
+    //             $receiveItemSql = "INSERT INTO stock_receive_items(
+    //                                 receive_item_id, receive_id, product_id, quantity_receive, 
+    //                                 unit_cost
+    //                             ) VALUES(
+    //                                 :receiveItemId, :receiveId, :productId, :quantityReceive, 
+    //                                 :unitCost
+    //                             )";
+                
+    //             $receiveItemStmt = $conn->prepare($receiveItemSql);
+    //             $receiveItemStmt->bindValue(":receiveItemId", $receiveItemId);
+    //             $receiveItemStmt->bindValue(":receiveId", $receiveId);
+    //             $receiveItemStmt->bindValue(":productId", $item['product_id']);
+    //             $receiveItemStmt->bindValue(":quantityReceive", $item['quantity_receive'], PDO::PARAM_INT);
+    //             $receiveItemStmt->bindValue(":unitCost", $item['unit_cost']);
+                
+    //             if (!$receiveItemStmt->execute()) {
+    //                 throw new Exception("Failed to create receive item");
+    //             }
+
+    //             // Update warehouse stock with received quantity
+    //             $this->updateWarehouseStock($conn, $data['warehouse_id'], $item['product_id'], 
+    //                                     $item['quantity_receive'], $item['unit_cost']);
+    //         }
+            
+    //         $conn->commit();
+            
+    //         return json_encode([
+    //             'status' => 'success',
+    //             'message' => 'Stock received and added to warehouse successfully',
+    //             'data' => [
+    //                 'receive_id' => $receiveId,
+    //                 'order_id' => $data['order_id'],
+    //                 'supplier_receipt' => $data['supplier_receipt'],
+    //                 'receive_date' => $receiveDate,
+    //                 'warehouse_id' => $data['warehouse_id'],
+    //                 'total_amount' => $totalAmount,
+    //                 'return_items' => $returnItems // Items that can be returned to supplier
+    //             ]
+    //         ]);
+            
+    //     } catch (Exception $e) {
+    //         $conn->rollBack();
+    //         return json_encode([
+    //             'status' => 'error',
+    //             'message' => $e->getMessage()
+    //         ]);
+    //     }
+    // }
     function receiveStock($data) {
         include "connection-pdo.php";
         $conn->beginTransaction();
@@ -37,12 +276,12 @@ class StockReceive {
             if (empty($data['received_by'])) {
                 throw new Exception("Received by user ID is required");
             }
-            if (empty($data['supplier_receipt'])) {
-                throw new Exception("Supplier receipt number is required");
-            }
             if (empty($data['items']) || !is_array($data['items'])) {
                 throw new Exception("Items are required");
             }
+
+            // Generate supplier receipt number automatically
+            $supplierReceipt = $this->generateSupplierReceipt($conn, $data['warehouse_id']);
 
             // Verify purchase order exists and get order items
             $orderCheckSql = "SELECT 
@@ -127,7 +366,7 @@ class StockReceive {
                 }
             }
 
-            // Insert stock receive record
+            // Insert stock receive record with auto-generated supplier receipt
             $receiveSql = "INSERT INTO stock_receive(
                             receive_id, supplier_receipt, order_id, 
                             receive_date, supplier_id, warehouse_id, received_by, total_amount
@@ -138,7 +377,7 @@ class StockReceive {
             
             $receiveStmt = $conn->prepare($receiveSql);
             $receiveStmt->bindValue(":receiveId", $receiveId);
-            $receiveStmt->bindValue(":supplierReceipt", $data['supplier_receipt']);
+            $receiveStmt->bindValue(":supplierReceipt", $supplierReceipt);
             $receiveStmt->bindValue(":orderId", $data['order_id']);
             $receiveStmt->bindValue(":receiveDate", $receiveDate);
             $receiveStmt->bindValue(":supplierId", $order['supplier_id']);
@@ -187,7 +426,7 @@ class StockReceive {
                 'data' => [
                     'receive_id' => $receiveId,
                     'order_id' => $data['order_id'],
-                    'supplier_receipt' => $data['supplier_receipt'],
+                    'supplier_receipt' => $supplierReceipt, // Return the auto-generated receipt number
                     'receive_date' => $receiveDate,
                     'warehouse_id' => $data['warehouse_id'],
                     'total_amount' => $totalAmount,
@@ -203,6 +442,7 @@ class StockReceive {
             ]);
         }
     }
+
 
     // Return items to supplier
     // function returnToSupplier($data) {
@@ -534,117 +774,6 @@ class StockReceive {
 }
 
     // Direct stock receive without purchase order
-    // function directStockReceive($data) {
-    //     include "connection-pdo.php";
-    //     $conn->beginTransaction();
-
-    //     try {
-    //         if (empty($data['supplier_id'])) {
-    //             throw new Exception("Supplier ID is required");
-    //         }
-    //         if (empty($data['warehouse_id'])) {
-    //             throw new Exception("Warehouse ID is required");
-    //         }
-    //         if (empty($data['received_by'])) {
-    //             throw new Exception("Received by user ID is required");
-    //         }
-    //         if (empty($data['supplier_receipt'])) {
-    //             throw new Exception("Supplier receipt number is required");
-    //         }
-    //         if (empty($data['items']) || !is_array($data['items'])) {
-    //             throw new Exception("Items are required");
-    //         }
-
-    //         // Generate UUID
-    //         $receiveId = $this->generateUuid();
-            
-    //         // Prepare data
-    //         $receiveDate = $data['receive_date'] ?? date('Y-m-d');
-            
-    //         // Calculate total amount
-    //         $totalAmount = 0;
-    //         foreach ($data['items'] as $item) {
-    //             if (empty($item['product_id']) || !isset($item['quantity_receive']) || empty($item['unit_cost'])) {
-    //                 throw new Exception("Product ID, quantity_receive, and unit cost are required for all items");
-    //             }
-    //             $totalAmount += $item['quantity_receive'] * $item['unit_cost'];
-    //         }
-
-    //         // Insert stock receive record (without order_id)
-    //         $receiveSql = "INSERT INTO stock_receive(
-    //                         receive_id, supplier_receipt, receive_date, 
-    //                         supplier_id, warehouse_id, received_by, total_amount
-    //                     ) VALUES(
-    //                         :receiveId, :supplierReceipt, :receiveDate, 
-    //                         :supplierId, :warehouseId, :receivedBy, :totalAmount
-    //                     )";
-            
-    //         $receiveStmt = $conn->prepare($receiveSql);
-    //         $receiveStmt->bindValue(":receiveId", $receiveId);
-    //         $receiveStmt->bindValue(":supplierReceipt", $data['supplier_receipt']);
-    //         $receiveStmt->bindValue(":receiveDate", $receiveDate);
-    //         $receiveStmt->bindValue(":supplierId", $data['supplier_id']);
-    //         $receiveStmt->bindValue(":warehouseId", $data['warehouse_id']);
-    //         $receiveStmt->bindValue(":receivedBy", $data['received_by']);
-    //         $receiveStmt->bindValue(":totalAmount", $totalAmount);
-            
-    //         if (!$receiveStmt->execute()) {
-    //             throw new Exception("Failed to create stock receive record");
-    //         }
-
-    //         // Process each item
-    //         foreach ($data['items'] as $item) {
-    //             $receiveItemId = $this->generateUuid();
-                
-    //             // Insert stock receive item
-    //             $receiveItemSql = "INSERT INTO stock_receive_items(
-    //                                 receive_item_id, receive_id, product_id, quantity_receive, 
-    //                                 unit_cost
-    //                             ) VALUES(
-    //                                 :receiveItemId, :receiveId, :productId, :quantityReceive, 
-    //                                 :unitCost
-    //                             )";
-                
-    //             $receiveItemStmt = $conn->prepare($receiveItemSql);
-    //             $receiveItemStmt->bindValue(":receiveItemId", $receiveItemId);
-    //             $receiveItemStmt->bindValue(":receiveId", $receiveId);
-    //             $receiveItemStmt->bindValue(":productId", $item['product_id']);
-    //             $receiveItemStmt->bindValue(":quantityReceive", $item['quantity_receive'], PDO::PARAM_INT);
-    //             $receiveItemStmt->bindValue(":unitCost", $item['unit_cost']);
-                
-    //             if (!$receiveItemStmt->execute()) {
-    //                 throw new Exception("Failed to create receive item");
-    //             }
-
-    //             // Update warehouse stock
-    //             $this->updateWarehouseStock($conn, $data['warehouse_id'], $item['product_id'], 
-    //                                     $item['quantity_receive'], $item['unit_cost']);
-    //         }
-            
-    //         $conn->commit();
-            
-    //         return json_encode([
-    //             'status' => 'success',
-    //             'message' => 'Direct stock receive completed successfully',
-    //             'data' => [
-    //                 'receive_id' => $receiveId,
-    //                 'supplier_receipt' => $data['supplier_receipt'],
-    //                 'receive_date' => $receiveDate,
-    //                 'supplier_id' => $data['supplier_id'],
-    //                 'warehouse_id' => $data['warehouse_id'],
-    //                 'total_amount' => $totalAmount
-    //             ]
-    //         ]);
-            
-    //     } catch (Exception $e) {
-    //         $conn->rollBack();
-    //         return json_encode([
-    //             'status' => 'error',
-    //             'message' => $e->getMessage()
-    //         ]);
-    //     }
-    // }
-
     private function updateWarehouseStock($conn, $warehouseId, $productId, $quantity, $unitCost) {
         // Check if stock record exists
         $checkSql = "SELECT stock_id, quantity FROM warehouse_stock 
@@ -1019,11 +1148,7 @@ switch($operation) {
     case "receiveStock":
         echo $stockReceive->receiveStock($data);
         break;
-        
-    // case "directStockReceive":
-    //     echo $stockReceive->directStockReceive($data);
-    //     break;
-        
+
     case "returnToSupplier":
         echo $stockReceive->returnToSupplier($data);
         break;

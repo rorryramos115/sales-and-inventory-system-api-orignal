@@ -542,19 +542,7 @@ switch($operation){
     default:
         echo json_encode([
             'status' => 'error',
-            'message' => 'Invalid operation',
-            'available_operations' => [
-                'insertWarehouse', 
-                'updateWarehouse', 
-                'getAllWarehouses', 
-                'getWarehouse', 
-                'deleteWarehouse', 
-                'searchWarehouses', 
-                'checkWarehouseName',
-                'getActiveWarehouses',
-                'getMainWarehouse',
-                'setMainWarehouse'
-            ]
+            'message' => 'Invalid operation'
         ]);
 }
 ?>
