@@ -105,6 +105,9 @@ CREATE TABLE products (
     barcode VARCHAR(100) UNIQUE,
     description TEXT,
     is_active BOOLEAN DEFAULT TRUE,
+    reorder_point INT(11) DEFAULT 50,   -- when to reorder
+    min_stock_level INT(11) DEFAULT 20, -- safety buffer
+    max_stock_level INT(11) DEFAULT 200 -- upper limit
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_product_category FOREIGN KEY (category_id) REFERENCES categories(category_id),
@@ -297,7 +300,6 @@ CREATE TABLE stock_adjustments (
     adjusted_by CHAR(36) NOT NULL,
     adjustment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     reason ENUM('spoilage','shrinkage','manual','consumption') NOT NULL,
-    notes TEXT,
     FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
     FOREIGN KEY (adjusted_by) REFERENCES users(user_id)
 );
