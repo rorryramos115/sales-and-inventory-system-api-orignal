@@ -53,6 +53,14 @@ CREATE TABLE warehouses (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+CREATE TABLE store (
+    store_id CHAR(36) PRIMARY KEY,
+    store_name VARCHAR(100) NOT NULL,
+    address VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- ===============================================
 -- COUNTERS (Store POS terminals)
 -- ===============================================
@@ -177,7 +185,7 @@ CREATE TABLE store_stock (
     unit_price DECIMAL(10,2),
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (store_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (store_id) REFERENCES store(store_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id),
     UNIQUE KEY (store_id, product_id)
 );
@@ -213,8 +221,8 @@ CREATE TABLE warehouse_stock_transfer_items (
 
 CREATE TABLE store_stock_transfer (
     transfer_id CHAR(36) PRIMARY KEY,
-    warehouse_id CHAR(36) NOT NULL,
-    store_id CHAR(36) NOT NULL,
+    from_warehouse_id CHAR(36) NOT NULL,
+    to_store_id CHAR(36) NOT NULL,
     status ENUM('pending','approved','in_transit','completed','cancelled') DEFAULT 'pending',
     created_by CHAR(36) NOT NULL,
     requested_date DATE NOT NULL,
@@ -222,8 +230,8 @@ CREATE TABLE store_stock_transfer (
     dispatched_date DATE,
     received_date DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (warehouse_id) REFERENCES warehouses(warehouse_id),
-    FOREIGN KEY (store_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (from_warehouse_id) REFERENCES warehouses(warehouse_id),
+    FOREIGN KEY (to_store_id) REFERENCES store(store_id),
     FOREIGN KEY (created_by) REFERENCES users(user_id)
 );
 
@@ -232,6 +240,7 @@ CREATE TABLE store_stock_transfer_items (
     transfer_id CHAR(36) NOT NULL,
     product_id CHAR(36) NOT NULL,
     quantity INT NOT NULL,
+    unit_price DECIMAL(10,2),
     FOREIGN KEY (transfer_id) REFERENCES store_stock_transfer(transfer_id),
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );

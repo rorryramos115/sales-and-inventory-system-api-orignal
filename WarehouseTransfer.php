@@ -12,7 +12,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
 }
 
 class WarehouseTransfer {
-    
     // Create warehouse transfer request
     function createTransferRequest($json) {
         include "connection-pdo.php";
