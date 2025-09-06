@@ -690,6 +690,67 @@ class User {
             ]);
         }
     }
+
+    // Update user status (active/inactive)
+    function updateUserStatus($data) {
+        include "connection-pdo.php";
+        $conn->beginTransaction();
+
+        try {
+            if (empty($data['user_id'])) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'User ID is required'
+                ]);
+                return;
+            }
+
+            if (!isset($data['is_active'])) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'is_active field is required'
+                ]);
+                return;
+            }
+
+            $isActive = (int)$data['is_active'];
+
+            $sql = "UPDATE users SET
+                        is_active = :isActive,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = :userId";
+            
+            $stmt = $conn->prepare($sql);
+            $stmt->bindValue(":isActive", $isActive, PDO::PARAM_INT);
+            $stmt->bindValue(":userId", $data['user_id']);
+            
+            if (!$stmt->execute()) {
+                echo json_encode([
+                    'status' => 'error',
+                    'message' => 'Failed to update user status'
+                ]);
+                return;
+            }
+            
+            $conn->commit();
+            
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'User status updated successfully',
+                'data' => [
+                    'user_id' => $data['user_id'],
+                    'is_active' => $isActive
+                ]
+            ]);
+            
+        } catch (PDOException $e) {
+            $conn->rollBack();
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
+        }
+    }
 }
 
 $user = new User();
@@ -715,6 +776,9 @@ switch ($operation) {
         break;
     case "updateUser":
         $user->updateUser($data);
+        break;
+    case "updateUserStatus":  // Add this new case
+        $user->updateUserStatus($data);
         break;
     case "login":
         $user->login($data);
