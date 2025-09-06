@@ -122,464 +122,242 @@ class PurchaseOrder {
         }
     }
 
-    // Get all purchase orders with their receive status
-    // function getAllPurchaseOrders() {
-    //     include "connection-pdo.php";
+    // Get all purchase orders with their receive status, received quantities, and return information
+    function getAllPurchaseOrders() {
+        include "connection-pdo.php";
 
-    //     try {
-    //         $sql = "SELECT 
-    //                     po.order_id,
-    //                     po.order_date,
-    //                     po.total_amount,
-    //                     po.created_at,
-    //                     po.updated_at,
+        try {
+            $sql = "SELECT 
+                        po.order_id,
+                        po.order_date,
+                        po.total_amount,
+                        po.created_at,
+                        po.updated_at,
                         
-    //                     -- Supplier information
-    //                     s.supplier_id,
-    //                     s.supplier_name,
-    //                     s.contact_person,
-    //                     s.phone as supplier_phone,
-    //                     s.email as supplier_email,
-    //                     s.address as supplier_address,
+                        -- Supplier information
+                        s.supplier_id,
+                        s.supplier_name,
+                        s.contact_person,
+                        s.phone as supplier_phone,
+                        s.email as supplier_email,
+                        s.address as supplier_address,
                         
-    //                     -- Created by user information
-    //                     u.user_id as created_by_id,
-    //                     u.full_name as created_by_name,
-    //                     u.email as created_by_email,
-    //                     u.phone as created_by_phone,
+                        -- Created by user information
+                        u.user_id as created_by_id,
+                        u.full_name as created_by_name,
+                        u.email as created_by_email,
+                        u.phone as created_by_phone,
                         
-    //                     -- Receive status
-    //                     sr.receive_id,
-    //                     sr.supplier_receipt,
-    //                     sr.receive_date,
-    //                     sr.warehouse_id,
-    //                     w.warehouse_name,
-    //                     ru.full_name as received_by_name,
+                        -- Receive status
+                        sr.receive_id,
+                        sr.supplier_receipt,
+                        sr.receive_date,
+                        sr.warehouse_id,
+                        w.warehouse_name,
+                        ru.full_name as received_by_name,
                         
-    //                     -- Status calculation
-    //                     CASE 
-    //                         WHEN sr.receive_id IS NOT NULL THEN 'RECEIVED'
-    //                         ELSE 'PENDING'
-    //                     END as receive_status
+                        -- Status calculation
+                        CASE 
+                            WHEN sr.receive_id IS NOT NULL THEN 'RECEIVED'
+                            ELSE 'PENDING'
+                        END as status
                         
-    //                 FROM purchase_orders po
-    //                 INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
-    //                 INNER JOIN users u ON po.created_by = u.user_id
-    //                 LEFT JOIN stock_receive sr ON po.order_id = sr.order_id
-    //                 LEFT JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-    //                 LEFT JOIN users ru ON sr.received_by = ru.user_id
-    //                 ORDER BY po.order_date DESC, po.created_at DESC";
+                    FROM purchase_orders po
+                    INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
+                    INNER JOIN users u ON po.created_by = u.user_id
+                    LEFT JOIN stock_receive sr ON po.order_id = sr.order_id
+                    LEFT JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
+                    LEFT JOIN users ru ON sr.received_by = ru.user_id
+                    ORDER BY po.order_date DESC, po.created_at DESC";
 
-    //         $stmt = $conn->prepare($sql);
-    //         $stmt->execute();
-    //         $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $stmt = $conn->prepare($sql);
+            $stmt->execute();
+            $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    //         // Get order items for each order
-    //         foreach ($orders as &$order) {
-    //             $itemsSql = "SELECT 
-    //                             poi.order_item_id,
-    //                             poi.product_id,
-    //                             poi.quantity,
-    //                             poi.unit_cost,
-    //                             poi.total_price,
+            // Get order items for each order
+            foreach ($orders as &$order) {
+                $itemsSql = "SELECT 
+                                poi.order_item_id,
+                                poi.product_id,
+                                poi.quantity as ordered_quantity,
+                                poi.unit_cost,
+                                poi.total_price,
                                 
-    //                             -- Product information
-    //                             p.product_name,
-    //                             p.barcode,
-    //                             p.description as product_description,
-    //                             p.selling_price,
+                                -- Product information
+                                p.product_name,
+                                p.barcode,
+                                p.description as product_description,
+                                p.selling_price,
                                 
-    //                             -- Category information (if exists)
-    //                             c.category_id,
-    //                             c.category_name,
+                                -- Category information (if exists)
+                                c.category_id,
+                                c.category_name,
                                 
-    //                             -- Brand information
-    //                             b.brand_id,
-    //                             b.brand_name,
+                                -- Brand information
+                                b.brand_id,
+                                b.brand_name,
                                 
-    //                             -- Unit information
-    //                             un.unit_id,
-    //                             un.unit_name
+                                -- Unit information
+                                un.unit_id,
+                                un.unit_name,
                                 
-    //                         FROM purchase_order_items poi
-    //                         INNER JOIN products p ON poi.product_id = p.product_id
-    //                         LEFT JOIN categories c ON p.category_id = c.category_id
-    //                         LEFT JOIN brands b ON p.brand_id = b.brand_id
-    //                         LEFT JOIN units un ON p.unit_id = un.unit_id
-    //                         WHERE poi.order_id = :orderId";
+                                -- Received quantity (if any)
+                                COALESCE(sri.quantity_receive, 0) as quantity_receive,
+                                
+                                -- Returned quantity (if any)
+                                COALESCE(return_info.returned_quantity, 0) as returned_quantity,
+                                
+                                -- Calculate quantity difference (what needs to be returned)
+                                GREATEST(0, poi.quantity - COALESCE(sri.quantity_receive, 0)) as quantity_to_return,
+                                
+                                -- Check if fully received
+                                CASE 
+                                    WHEN COALESCE(sri.quantity_receive, 0) = 0 THEN 'NOT_RECEIVED'
+                                    WHEN poi.quantity = COALESCE(sri.quantity_receive, 0) THEN 'FULLY_RECEIVED'
+                                    ELSE 'PARTIALLY_RECEIVED'
+                                END as receive_status,
+                                
+                                -- Check return status
+                                CASE 
+                                    -- No returns needed (fully received or not received)
+                                    WHEN COALESCE(sri.quantity_receive, 0) = 0 OR poi.quantity = COALESCE(sri.quantity_receive, 0) THEN 'NO_RETURN_NEEDED'
+                                    
+                                    -- Returns needed but not processed yet
+                                    WHEN poi.quantity > COALESCE(sri.quantity_receive, 0) AND 
+                                        COALESCE(return_info.returned_quantity, 0) = 0 THEN 'RETURN_NEEDED'
+                                    
+                                    -- Returns partially processed
+                                    WHEN poi.quantity > COALESCE(sri.quantity_receive, 0) AND 
+                                        COALESCE(return_info.returned_quantity, 0) > 0 AND
+                                        COALESCE(return_info.returned_quantity, 0) < (poi.quantity - COALESCE(sri.quantity_receive, 0)) THEN 'PARTIAL_RETURN'
+                                    
+                                    -- Returns fully processed
+                                    WHEN COALESCE(return_info.returned_quantity, 0) >= (poi.quantity - COALESCE(sri.quantity_receive, 0)) THEN 'RETURN_COMPLETED'
+                                    
+                                    ELSE 'NO_RETURN_NEEDED'
+                                END as return_status,
+                                
+                                -- Calculate pending return quantity
+                                GREATEST(0, (poi.quantity - COALESCE(sri.quantity_receive, 0)) - COALESCE(return_info.returned_quantity, 0)) as pending_return_quantity
+                                
+                            FROM purchase_order_items poi
+                            INNER JOIN products p ON poi.product_id = p.product_id
+                            LEFT JOIN categories c ON p.category_id = c.category_id
+                            LEFT JOIN brands b ON p.brand_id = b.brand_id
+                            LEFT JOIN units un ON p.unit_id = un.unit_id
+                            LEFT JOIN stock_receive sr ON poi.order_id = sr.order_id
+                            LEFT JOIN stock_receive_items sri ON sr.receive_id = sri.receive_id AND poi.product_id = sri.product_id
+                            LEFT JOIN (
+                                SELECT 
+                                    sri.product_id,
+                                    sr.order_id,
+                                    SUM(sri.quantity_return) as returned_quantity
+                                FROM supplier_return_items sri
+                                INNER JOIN supplier_returns sr ON sri.return_id = sr.return_id
+                                GROUP BY sri.product_id, sr.order_id
+                            ) return_info ON poi.product_id = return_info.product_id AND poi.order_id = return_info.order_id
+                            WHERE poi.order_id = :orderId";
                 
-    //             $itemsStmt = $conn->prepare($itemsSql);
-    //             $itemsStmt->bindValue(":orderId", $order['order_id']);
-    //             $itemsStmt->execute();
-    //             $order['items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-    //         }
-
-    //         echo json_encode([
-    //             'status' => 'success',
-    //             'message' => 'All purchase orders retrieved successfully',
-    //             'data' => [
-    //                 'total_orders' => count($orders),
-    //                 'orders' => $orders
-    //             ]
-    //         ]);
-            
-    //     } catch (PDOException $e) {
-    //         echo json_encode([
-    //             'status' => 'error',
-    //             'message' => 'Database error: ' . $e->getMessage()
-    //         ]);
-    //     }
-    // }
-
-    // Get all purchase orders with their receive status and received quantities
-// function getAllPurchaseOrders() {
-//     include "connection-pdo.php";
-
-//     try {
-//         $sql = "SELECT 
-//                     po.order_id,
-//                     po.order_date,
-//                     po.total_amount,
-//                     po.created_at,
-//                     po.updated_at,
+                $itemsStmt = $conn->prepare($itemsSql);
+                $itemsStmt->bindValue(":orderId", $order['order_id']);
+                $itemsStmt->execute();
+                $order['items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                // Add return information for the entire order
+                $returnSql = "SELECT 
+                                sr.return_id,
+                                sr.return_date,
+                                sr.reason,
+                                sr.total_amount,
+                                sr.returned_by,
+                                u.full_name as returned_by_name,
+                                COUNT(sri.product_id) as total_returned_items,
+                                SUM(sri.quantity_return) as total_returned_quantity
+                            FROM supplier_returns sr
+                            INNER JOIN supplier_return_items sri ON sr.return_id = sri.return_id
+                            INNER JOIN users u ON sr.returned_by = u.user_id
+                            WHERE sr.order_id = :orderId
+                            GROUP BY sr.return_id
+                            ORDER BY sr.return_date DESC";
+                
+                $returnStmt = $conn->prepare($returnSql);
+                $returnStmt->bindValue(":orderId", $order['order_id']);
+                $returnStmt->execute();
+                $order['returns'] = $returnStmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                // Calculate overall order status
+                $totalItems = count($order['items']);
+                $fullyReceivedItems = 0;
+                $partiallyReceivedItems = 0;
+                $notReceivedItems = 0;
+                $hasReturnsNeeded = false;
+                $hasPendingReturns = false;
+                $hasCompletedReturns = false;
+                
+                foreach ($order['items'] as $item) {
+                    if ($item['receive_status'] === 'FULLY_RECEIVED') {
+                        $fullyReceivedItems++;
+                    } elseif ($item['receive_status'] === 'PARTIALLY_RECEIVED') {
+                        $partiallyReceivedItems++;
+                    } else {
+                        $notReceivedItems++;
+                    }
                     
-//                     -- Supplier information
-//                     s.supplier_id,
-//                     s.supplier_name,
-//                     s.contact_person,
-//                     s.phone as supplier_phone,
-//                     s.email as supplier_email,
-//                     s.address as supplier_address,
-                    
-//                     -- Created by user information
-//                     u.user_id as created_by_id,
-//                     u.full_name as created_by_name,
-//                     u.email as created_by_email,
-//                     u.phone as created_by_phone,
-                    
-//                     -- Receive status
-//                     sr.receive_id,
-//                     sr.supplier_receipt,
-//                     sr.receive_date,
-//                     sr.warehouse_id,
-//                     w.warehouse_name,
-//                     ru.full_name as received_by_name,
-                    
-//                     -- Status calculation
-//                     CASE 
-//                         WHEN sr.receive_id IS NOT NULL THEN 'RECEIVED'
-//                         ELSE 'PENDING'
-//                     END as status
-                    
-//                 FROM purchase_orders po
-//                 INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
-//                 INNER JOIN users u ON po.created_by = u.user_id
-//                 LEFT JOIN stock_receive sr ON po.order_id = sr.order_id
-//                 LEFT JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-//                 LEFT JOIN users ru ON sr.received_by = ru.user_id
-//                 ORDER BY po.order_date DESC, po.created_at DESC";
-
-//         $stmt = $conn->prepare($sql);
-//         $stmt->execute();
-//         $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-//         // Get order items for each order
-//         foreach ($orders as &$order) {
-//             $itemsSql = "SELECT 
-//                             poi.order_item_id,
-//                             poi.product_id,
-//                             poi.quantity,
-//                             poi.unit_cost,
-//                             poi.total_price,
-                            
-//                             -- Product information
-//                             p.product_name,
-//                             p.barcode,
-//                             p.description as product_description,
-//                             p.selling_price,
-                            
-//                             -- Category information (if exists)
-//                             c.category_id,
-//                             c.category_name,
-                            
-//                             -- Brand information
-//                             b.brand_id,
-//                             b.brand_name,
-                            
-//                             -- Unit information
-//                             un.unit_id,
-//                             un.unit_name,
-                            
-//                             -- Received quantity (if any)
-//                             COALESCE(sri.quantity_receive, 0) as quantity_receive
-                            
-//                         FROM purchase_order_items poi
-//                         INNER JOIN products p ON poi.product_id = p.product_id
-//                         LEFT JOIN categories c ON p.category_id = c.category_id
-//                         LEFT JOIN brands b ON p.brand_id = b.brand_id
-//                         LEFT JOIN units un ON p.unit_id = un.unit_id
-//                         LEFT JOIN stock_receive sr ON poi.order_id = sr.order_id
-//                         LEFT JOIN stock_receive_items sri ON sr.receive_id = sri.receive_id AND poi.product_id = sri.product_id
-//                         WHERE poi.order_id = :orderId";
-            
-//             $itemsStmt = $conn->prepare($itemsSql);
-//             $itemsStmt->bindValue(":orderId", $order['order_id']);
-//             $itemsStmt->execute();
-//             $order['items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-//         }
-
-//         echo json_encode([
-//             'status' => 'success',
-//             'message' => 'All purchase orders retrieved successfully',
-//             'data' => [
-//                 'total_orders' => count($orders),
-//                 'orders' => $orders
-//             ]
-//         ]);
-        
-//     } catch (PDOException $e) {
-//         echo json_encode([
-//             'status' => 'error',
-//             'message' => 'Database error: ' . $e->getMessage()
-//         ]);
-//     }
-// }
-// Get all purchase orders with their receive status, received quantities, and return information
-function getAllPurchaseOrders() {
-    include "connection-pdo.php";
-
-    try {
-        $sql = "SELECT 
-                    po.order_id,
-                    po.order_date,
-                    po.total_amount,
-                    po.created_at,
-                    po.updated_at,
-                    
-                    -- Supplier information
-                    s.supplier_id,
-                    s.supplier_name,
-                    s.contact_person,
-                    s.phone as supplier_phone,
-                    s.email as supplier_email,
-                    s.address as supplier_address,
-                    
-                    -- Created by user information
-                    u.user_id as created_by_id,
-                    u.full_name as created_by_name,
-                    u.email as created_by_email,
-                    u.phone as created_by_phone,
-                    
-                    -- Receive status
-                    sr.receive_id,
-                    sr.supplier_receipt,
-                    sr.receive_date,
-                    sr.warehouse_id,
-                    w.warehouse_name,
-                    ru.full_name as received_by_name,
-                    
-                    -- Status calculation
-                    CASE 
-                        WHEN sr.receive_id IS NOT NULL THEN 'RECEIVED'
-                        ELSE 'PENDING'
-                    END as status
-                    
-                FROM purchase_orders po
-                INNER JOIN suppliers s ON po.supplier_id = s.supplier_id
-                INNER JOIN users u ON po.created_by = u.user_id
-                LEFT JOIN stock_receive sr ON po.order_id = sr.order_id
-                LEFT JOIN warehouses w ON sr.warehouse_id = w.warehouse_id
-                LEFT JOIN users ru ON sr.received_by = ru.user_id
-                ORDER BY po.order_date DESC, po.created_at DESC";
-
-        $stmt = $conn->prepare($sql);
-        $stmt->execute();
-        $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Get order items for each order
-        foreach ($orders as &$order) {
-            $itemsSql = "SELECT 
-                            poi.order_item_id,
-                            poi.product_id,
-                            poi.quantity as ordered_quantity,
-                            poi.unit_cost,
-                            poi.total_price,
-                            
-                            -- Product information
-                            p.product_name,
-                            p.barcode,
-                            p.description as product_description,
-                            p.selling_price,
-                            
-                            -- Category information (if exists)
-                            c.category_id,
-                            c.category_name,
-                            
-                            -- Brand information
-                            b.brand_id,
-                            b.brand_name,
-                            
-                            -- Unit information
-                            un.unit_id,
-                            un.unit_name,
-                            
-                            -- Received quantity (if any)
-                            COALESCE(sri.quantity_receive, 0) as quantity_receive,
-                            
-                            -- Returned quantity (if any)
-                            COALESCE(return_info.returned_quantity, 0) as returned_quantity,
-                            
-                            -- Calculate quantity difference (what needs to be returned)
-                            GREATEST(0, poi.quantity - COALESCE(sri.quantity_receive, 0)) as quantity_to_return,
-                            
-                            -- Check if fully received
-                            CASE 
-                                WHEN COALESCE(sri.quantity_receive, 0) = 0 THEN 'NOT_RECEIVED'
-                                WHEN poi.quantity = COALESCE(sri.quantity_receive, 0) THEN 'FULLY_RECEIVED'
-                                ELSE 'PARTIALLY_RECEIVED'
-                            END as receive_status,
-                            
-                            -- Check return status
-                            CASE 
-                                -- No returns needed (fully received or not received)
-                                WHEN COALESCE(sri.quantity_receive, 0) = 0 OR poi.quantity = COALESCE(sri.quantity_receive, 0) THEN 'NO_RETURN_NEEDED'
-                                
-                                -- Returns needed but not processed yet
-                                WHEN poi.quantity > COALESCE(sri.quantity_receive, 0) AND 
-                                     COALESCE(return_info.returned_quantity, 0) = 0 THEN 'RETURN_NEEDED'
-                                
-                                -- Returns partially processed
-                                WHEN poi.quantity > COALESCE(sri.quantity_receive, 0) AND 
-                                     COALESCE(return_info.returned_quantity, 0) > 0 AND
-                                     COALESCE(return_info.returned_quantity, 0) < (poi.quantity - COALESCE(sri.quantity_receive, 0)) THEN 'PARTIAL_RETURN'
-                                
-                                -- Returns fully processed
-                                WHEN COALESCE(return_info.returned_quantity, 0) >= (poi.quantity - COALESCE(sri.quantity_receive, 0)) THEN 'RETURN_COMPLETED'
-                                
-                                ELSE 'NO_RETURN_NEEDED'
-                            END as return_status,
-                            
-                            -- Calculate pending return quantity
-                            GREATEST(0, (poi.quantity - COALESCE(sri.quantity_receive, 0)) - COALESCE(return_info.returned_quantity, 0)) as pending_return_quantity
-                            
-                        FROM purchase_order_items poi
-                        INNER JOIN products p ON poi.product_id = p.product_id
-                        LEFT JOIN categories c ON p.category_id = c.category_id
-                        LEFT JOIN brands b ON p.brand_id = b.brand_id
-                        LEFT JOIN units un ON p.unit_id = un.unit_id
-                        LEFT JOIN stock_receive sr ON poi.order_id = sr.order_id
-                        LEFT JOIN stock_receive_items sri ON sr.receive_id = sri.receive_id AND poi.product_id = sri.product_id
-                        LEFT JOIN (
-                            SELECT 
-                                sri.product_id,
-                                sr.order_id,
-                                SUM(sri.quantity_return) as returned_quantity
-                            FROM supplier_return_items sri
-                            INNER JOIN supplier_returns sr ON sri.return_id = sr.return_id
-                            GROUP BY sri.product_id, sr.order_id
-                        ) return_info ON poi.product_id = return_info.product_id AND poi.order_id = return_info.order_id
-                        WHERE poi.order_id = :orderId";
-            
-            $itemsStmt = $conn->prepare($itemsSql);
-            $itemsStmt->bindValue(":orderId", $order['order_id']);
-            $itemsStmt->execute();
-            $order['items'] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // Add return information for the entire order
-            $returnSql = "SELECT 
-                            sr.return_id,
-                            sr.return_date,
-                            sr.reason,
-                            sr.total_amount,
-                            sr.returned_by,
-                            u.full_name as returned_by_name,
-                            COUNT(sri.product_id) as total_returned_items,
-                            SUM(sri.quantity_return) as total_returned_quantity
-                         FROM supplier_returns sr
-                         INNER JOIN supplier_return_items sri ON sr.return_id = sri.return_id
-                         INNER JOIN users u ON sr.returned_by = u.user_id
-                         WHERE sr.order_id = :orderId
-                         GROUP BY sr.return_id
-                         ORDER BY sr.return_date DESC";
-            
-            $returnStmt = $conn->prepare($returnSql);
-            $returnStmt->bindValue(":orderId", $order['order_id']);
-            $returnStmt->execute();
-            $order['returns'] = $returnStmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // Calculate overall order status
-            $totalItems = count($order['items']);
-            $fullyReceivedItems = 0;
-            $partiallyReceivedItems = 0;
-            $notReceivedItems = 0;
-            $hasReturnsNeeded = false;
-            $hasPendingReturns = false;
-            $hasCompletedReturns = false;
-            
-            foreach ($order['items'] as $item) {
-                if ($item['receive_status'] === 'FULLY_RECEIVED') {
-                    $fullyReceivedItems++;
-                } elseif ($item['receive_status'] === 'PARTIALLY_RECEIVED') {
-                    $partiallyReceivedItems++;
-                } else {
-                    $notReceivedItems++;
+                    // Check return status
+                    if ($item['return_status'] === 'RETURN_NEEDED' || $item['return_status'] === 'PARTIAL_RETURN') {
+                        $hasReturnsNeeded = true;
+                        $hasPendingReturns = true;
+                    } elseif ($item['return_status'] === 'RETURN_COMPLETED') {
+                        $hasCompletedReturns = true;
+                    }
                 }
                 
-                // Check return status
-                if ($item['return_status'] === 'RETURN_NEEDED' || $item['return_status'] === 'PARTIAL_RETURN') {
-                    $hasReturnsNeeded = true;
-                    $hasPendingReturns = true;
-                } elseif ($item['return_status'] === 'RETURN_COMPLETED') {
-                    $hasCompletedReturns = true;
-                }
-            }
-            
-            // Set overall order status
-            if ($notReceivedItems === $totalItems) {
-                $order['overall_status'] = 'PENDING_RECEIPT';
-            } elseif ($fullyReceivedItems === $totalItems) {
-                if ($hasPendingReturns) {
-                    $order['overall_status'] = 'RECEIVED_WITH_PENDING_RETURNS';
-                } elseif ($hasCompletedReturns) {
-                    $order['overall_status'] = 'RECEIVED_WITH_COMPLETED_RETURNS';
+                // Set overall order status
+                if ($notReceivedItems === $totalItems) {
+                    $order['overall_status'] = 'PENDING_RECEIPT';
+                } elseif ($fullyReceivedItems === $totalItems) {
+                    if ($hasPendingReturns) {
+                        $order['overall_status'] = 'RECEIVED_WITH_PENDING_RETURNS';
+                    } elseif ($hasCompletedReturns) {
+                        $order['overall_status'] = 'RECEIVED_WITH_COMPLETED_RETURNS';
+                    } else {
+                        $order['overall_status'] = 'FULLY_RECEIVED';
+                    }
                 } else {
-                    $order['overall_status'] = 'FULLY_RECEIVED';
+                    $order['overall_status'] = 'PARTIALLY_RECEIVED';
+                    if ($hasPendingReturns) {
+                        $order['overall_status'] = 'PARTIALLY_RECEIVED_WITH_PENDING_RETURNS';
+                    }
                 }
-            } else {
-                $order['overall_status'] = 'PARTIALLY_RECEIVED';
-                if ($hasPendingReturns) {
-                    $order['overall_status'] = 'PARTIALLY_RECEIVED_WITH_PENDING_RETURNS';
-                }
+                
+                // Calculate summary statistics
+                $order['summary'] = [
+                    'total_ordered_quantity' => array_sum(array_column($order['items'], 'ordered_quantity')),
+                    'total_received_quantity' => array_sum(array_column($order['items'], 'quantity_receive')),
+                    'total_returned_quantity' => array_sum(array_column($order['items'], 'returned_quantity')),
+                    'total_pending_return_quantity' => array_sum(array_column($order['items'], 'pending_return_quantity')),
+                    'items_needing_returns' => count(array_filter($order['items'], function($item) {
+                        return $item['return_status'] === 'RETURN_NEEDED' || $item['return_status'] === 'PARTIAL_RETURN';
+                    }))
+                ];
             }
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'All purchase orders retrieved successfully',
+                'data' => [
+                    'total_orders' => count($orders),
+                    'orders' => $orders
+                ]
+            ]);
             
-            // Calculate summary statistics
-            $order['summary'] = [
-                'total_ordered_quantity' => array_sum(array_column($order['items'], 'ordered_quantity')),
-                'total_received_quantity' => array_sum(array_column($order['items'], 'quantity_receive')),
-                'total_returned_quantity' => array_sum(array_column($order['items'], 'returned_quantity')),
-                'total_pending_return_quantity' => array_sum(array_column($order['items'], 'pending_return_quantity')),
-                'items_needing_returns' => count(array_filter($order['items'], function($item) {
-                    return $item['return_status'] === 'RETURN_NEEDED' || $item['return_status'] === 'PARTIAL_RETURN';
-                }))
-            ];
+        } catch (PDOException $e) {
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'Database error: ' . $e->getMessage()
+            ]);
         }
-
-        echo json_encode([
-            'status' => 'success',
-            'message' => 'All purchase orders retrieved successfully',
-            'data' => [
-                'total_orders' => count($orders),
-                'orders' => $orders
-            ]
-        ]);
-        
-    } catch (PDOException $e) {
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'Database error: ' . $e->getMessage()
-        ]);
     }
-}
 
     // Add this method to your PurchaseOrder class
     function getAllPurchaseOrderDetails() {

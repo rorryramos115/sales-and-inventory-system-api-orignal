@@ -178,6 +178,44 @@ class Product {
     }
 
     // Get all products - Updated with brands and units joins
+    // function getAllProducts() {
+    //     include "connection-pdo.php";
+
+    //     try {
+    //         $sql = "SELECT 
+    //                     p.product_id,
+    //                     p.product_name,
+    //                     p.barcode,
+    //                     p.selling_price,
+    //                     p.description,
+    //                     p.is_active,
+    //                     p.created_at,
+    //                     p.updated_at,
+    //                     c.category_name,
+    //                     b.brand_name,
+    //                     u.unit_name
+    //                 FROM products p 
+    //                 JOIN categories c ON p.category_id = c.category_id 
+    //                 JOIN brands b ON p.brand_id = b.brand_id
+    //                 JOIN units u ON p.unit_id = u.unit_id
+    //                 ORDER BY p.product_name";
+            
+    //         $stmt = $conn->prepare($sql);
+    //         $stmt->execute();
+    //         $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    //         echo json_encode([
+    //             'status' => 'success',
+    //             'message' => 'Products retrieved successfully',
+    //             'data' => $products
+    //         ]);
+    //     } catch (PDOException $e) {
+    //         echo json_encode([
+    //             'status' => 'error',
+    //             'message' => 'Database error: ' . $e->getMessage()
+    //         ]);
+    //     }
+    // }
     function getAllProducts() {
         include "connection-pdo.php";
 
@@ -189,6 +227,9 @@ class Product {
                         p.selling_price,
                         p.description,
                         p.is_active,
+                        p.reorder_point,
+                        p.min_stock_level,
+                        p.max_stock_level,
                         p.created_at,
                         p.updated_at,
                         c.category_name,
@@ -499,6 +540,7 @@ class Product {
                         p.barcode,
                         p.selling_price,
                         p.description,
+                        p.max_stock_level,
                         p.is_active as product_active,
                         c.category_name,
                         b.brand_name,
